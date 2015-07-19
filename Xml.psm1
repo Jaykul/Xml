@@ -20,7 +20,7 @@
 # Version    4.1 Tweaked namespaces again so they don't cascade down when they shouldn't. Got rid of the unnecessary stack.
 # Version    4.2 Tightened xml: only cmdlet, function, and external scripts, with "-" in their names are exempted from being converted into xml tags.
 #                Fixed some alias error messages caused when PSCX is already loaded (we overwrite their aliases for cvxml and fxml)
-# Version    4.3 Added a Path parameter set to Format-XML so you can specify xml files for prety printing
+# Version    4.3 Added a Path parameter set to Format-Xml so you can specify xml files for prety printing
 # Version    4.5 Fixed possible [Array]::Reverse call on a non-array in New-XElement (used by New-XDocument)
 #                Work around possible variable slipping on null values by:
 #                1) allowing -param:$value syntax (which doesn't fail when $value is null)
@@ -30,24 +30,105 @@
 # Version    4.7 Fixed a typo in the namespace parameter of Select-Xml
 # Version    4.8 Fixed up some uses of Select-Xml -RemoveNamespace
 # Version    5.0 Added Update-Xml to allow setting xml attributes or node content
-
-
-$xlr8r = [psobject].assembly.gettype("System.Management.Automation.TypeAccelerators")
-$xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
+# Version    6.0 Major cleanup, breaking changes.
+#       - Added Get-XmlContent and Set-XmlContent for loading/saving XML from files or strings
+#       - Removed Path and Content parameters from the other functions (it greatly simplifies thost functions, and makes the whole thing more maintainable)
+#       - Updated Update-Xml to support adding nodes "before" and "after" other nodes, and to support "remove"ing nodes
+&{ 
+$local:xlr8r = [psobject].assembly.gettype("System.Management.Automation.TypeAccelerators")
+$local:xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
 $xlinq.GetTypes() | ? { $_.IsPublic -and !$_.IsSerializable -and $_.Name -ne "Extensions" -and !$xlr8r::Get[$_.Name] } | % {
   $xlr8r::Add( $_.Name, $_.FullName )
 }
-if(!$xlr8r::Get["Stack"]) {
-   $xlr8r::Add( "Stack", "System.Collections.Generic.Stack``1, System, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" )
-}
+
 if(!$xlr8r::Get["Dictionary"]) {
    $xlr8r::Add( "Dictionary", "System.Collections.Generic.Dictionary``2, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" )
 }
 if(!$xlr8r::Get["PSParser"]) {
    $xlr8r::Add( "PSParser", "System.Management.Automation.PSParser, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35" )
 }
+}
 
-filter Format-XML {
+
+function Import-Xml {
+#.Synopsis
+#   Load an XML file as an XmlDocument
+param(
+    # Specifies a string that contains the XML to load, or a path to a file which has the XML to load (wildcards are permitted).
+    [Parameter(Position=1,Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("PSPath","Path")]
+    [String[]]$Content
+,
+    # If set, loads XML with all namespace qualifiers removed, and all entities expanded.
+    [Alias("Rn","Rm")]
+    [Switch]$RemoveNamespace
+)
+begin {
+    [Text.StringBuilder]$XmlContent = [String]::Empty
+    [bool]$Path = $true
+}
+process {
+    if($Path -and ($Path = Test-Path @($Content)[0] -EA 0)) { 
+        foreach($file in Resolve-Path $Content) {
+            $xml = New-Object System.Xml.XmlDocument; 
+            if($file.Provider.Name -eq "FileSystem") {
+                $xml.Load( $file.ProviderPath )
+            } else {
+                $ofs = "`n"
+                $xml.LoadXml( ([String](Get-Content $file)) )
+            }
+            if($RemoveNamespace) {
+                [System.Xml.XmlNode[]]$Xml = @(Remove-XmlNamespace -Xml $node)
+            }
+            Write-Output $xml
+        }
+    } else {
+        # If the "path" parameter isn't actually a path, assume that it's actually content
+        foreach($line in $content) {
+            $null = $XmlContent.AppendLine( $line )
+        }
+    }
+}
+end {
+    if(!$Path) {
+        $xml = New-Object System.Xml.XmlDocument; 
+        $xml.LoadXml( $XmlContent.ToString() )
+        if($RemoveNamespace) {
+            $Xml = @(Remove-XmlNamespace -Xml $xml)
+        }
+        Write-Output $xml
+    }
+}}
+Set-Alias ipxml Import-Xml
+Set-Alias ipx Import-Xml
+Set-Alias Get-Xml Import-Xml
+Set-Alias gxml Import-Xml
+Set-Alias gx Import-Xml
+
+function Export-Xml {
+param(
+    [Parameter(Mandatory=$true, Position=1)]
+    [Alias("PSPath")]
+    [String]$Path
+,
+    # Specifies one or more XML nodes to search.
+    [Parameter(Position=5,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("Node")]
+    [Xml]$Xml
+)
+process {
+    $xml.Save( $Path )
+}
+}
+Set-Alias epxml Export-Xml
+Set-Alias epx Export-Xml
+Set-Alias Set-Xml Export-Xml
+Set-Alias sxml Export-Xml
+Set-Alias sx Export-Xml
+
+function Format-Xml {
 #.Synopsis
 #   Pretty-print formatted XML source
 #.Description
@@ -69,7 +150,7 @@ filter Format-XML {
 #   ls *.xml | Format-Xml
 #
 [CmdletBinding()]
-Param(
+param(
    [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true, ParameterSetName="Document")]
    [xml]$Xml
 ,
@@ -80,6 +161,7 @@ Param(
    [Parameter(Mandatory=$false)]
    $Indent=2
 )
+process {
    ## Load from file, if necessary
    if($Path) { [xml]$xml = Get-Content $Path }
    
@@ -91,8 +173,28 @@ Param(
    $XmlWriter.Flush()
    $StringWriter.Flush()
    Write-Output $StringWriter.ToString()
-}
+}}
 Set-Alias fxml Format-Xml -EA 0
+Set-Alias fx   Format-Xml -EA 0
+
+function Select-XmlNodeInternal {
+[CmdletBinding()]
+param([Xml.XmlNode[]]$Xml, [String[]]$XPath, [Hashtable]$NamespaceManager)
+begin {
+    Write-Verbose "XPath = $($XPath -join ',')"
+    foreach($node in $xml) {
+        if($NamespaceManager) {
+            $nsManager = new-object System.Xml.XmlNamespaceManager $node.NameTable
+            foreach($ns in $NamespaceManager.GetEnumerator()) {
+                $nsManager.AddNamespace( $ns.Key, $ns.Value )
+            }
+            Write-Verbose "Names = $($nsManager | % { @{ $_ = $nsManager.LookupNamespace($_) } } | Out-String)"
+        }
+        foreach($path in $xpath) {
+            $node.SelectNodes($path, $nsManager)
+        }
+    }
+}}
 
 function Select-Xml {
 #.Synopsis
@@ -104,98 +206,71 @@ function Select-Xml {
 #
 #  Also note that if the -RemoveNamespace switch is supplied the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
 [CmdletBinding(DefaultParameterSetName="Xml")]
-PARAM(
+param(
+    # Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
+    [Parameter(Position=1,Mandatory=$true,ValueFromPipeline=$false)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("Query")]
+    [String[]]$XPath
+,
+    # Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
+    [Parameter(ParameterSetName="Content",Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [String[]]$Content
+,
     # Specifies the path and file names of the XML files to search.  Wildcards are permitted.
-   [Parameter(Position=1,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("PSPath")]
-   [String[]]$Path
+    [Parameter(Position=5,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("PSPath")]
+    [String[]]$Path
 ,
-    #  Specifies one or more XML nodes to search.
-   [Parameter(Position=1,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("Node")]
-   [System.Xml.XmlNode[]]$Xml
+    # Specifies one or more XML nodes to search.
+    [Parameter(Position=5,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("Node")]
+    [System.Xml.XmlNode[]]$Xml
 ,
-    #  Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
-   [Parameter(ParameterSetName="Content",Mandatory=$true,ValueFromPipeline=$true)]
-   [ValidateNotNullOrEmpty()]
-   [String[]]$Content
+    # Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
+    [Parameter(Position=10,Mandatory=$false)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("Ns")]
+    [Hashtable]$Namespace
 ,
-    #  Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
-   [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$false)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("Query")]
-   [String[]]$XPath
-,
-    #   Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
-   [Parameter(Mandatory=$false)]
-   [ValidateNotNullOrEmpty()]
-   [Hashtable]$Namespace
-,
-    #  Allows the execution of XPath queries without namespace qualifiers. 
-    #  
-    #  If you specify the -RemoveNamespace switch, all namespace declarations and prefixes are actually removed from the Xml before the XPath search query is evaluated, and your XPath query should therefore NOT contain any namespace prefixes.
+    # Allows the execution of XPath queries without namespace qualifiers. 
     # 
-    #  Note that this means that the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
-   [Switch]$RemoveNamespace
+    # If you specify the -RemoveNamespace switch, all namespace declarations and prefixes are actually removed from the Xml before the XPath search query is evaluated, and your XPath query should therefore NOT contain any namespace prefixes.
+    # 
+    # Note that this means that the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
+    [Alias("Rn","Rm")]
+    [Switch]$RemoveNamespace
 )
-BEGIN {
-   function Select-Node {
-   PARAM([Xml.XmlNode]$Xml, [String[]]$XPath, $NamespaceManager)
-   BEGIN {
-      foreach($node in $xml) {
-         if($NamespaceManager -is [Hashtable]) {
-            $nsManager = new-object System.Xml.XmlNamespaceManager $node.NameTable
-            foreach($ns in $Namespace.GetEnumerator()) {
-               $nsManager.AddNamespace( $ns.Key, $ns.Value )
+begin {
+    $NSM = $Null; if($PSBoundParameters.ContainsKey("Namespace")) { $NSM = $Namespace }
+    $XmlNodes = New-Object System.Xml.XmlNode[] 1
+    if($PSCmdlet.ParameterSetName -eq "Content") {
+        $XmlNodes = ConvertTo-Xml $Content -RemoveNamespace:$RemoveNamespace
+        Select-XmlNodeInternal $XmlNodes $XPath $NSM
+    }
+}
+process {
+    switch($PSCmdlet.ParameterSetName) {
+        "Path" {
+            $node = ConvertTo-Xml $Path -RemoveNamespace:$RemoveNamespace
+            Select-XmlNodeInternal $node $XPath $NSM
+        }
+        "Xml" {
+            foreach($node in $Xml) {
+                if($RemoveNamespace) {
+                   [Xml]$node = Remove-XmlNamespace -Xml $node
+                }
+                Select-XmlNodeInternal $node $XPath $NSM
             }
-         }
-         foreach($path in $xpath) {
-            $node.SelectNodes($path, $nsManager)
-   }  }  }  }
-
-   [Text.StringBuilder]$XmlContent = [String]::Empty
-}
-
-PROCESS {
-   $NSM = $Null; if($PSBoundParameters.ContainsKey("Namespace")) { $NSM = $Namespace }
-
-   switch($PSCmdlet.ParameterSetName) {
-      "Content" {
-         $null = $XmlContent.AppendLine( $Content -Join "`n" )
-      }
-      "Path" {
-         foreach($file in Get-ChildItem $Path) {
-            [Xml]$Xml = Get-Content $file
-            if($RemoveNamespace) {
-               $Xml = Remove-XmlNamespace -Xml $Xml
-            }
-            Select-Node $Xml $XPath $NSM
-         }
-      }
-      "Xml" {
-         foreach($node in $Xml) {
-            if($RemoveNamespace) {
-               [Xml]$node = Remove-XmlNamespace -Xml $node
-            }
-            Select-Node $node $XPath $NSM
-         }
-      }
-   }
-}
-END {
-   if($PSCmdlet.ParameterSetName -eq "Content") {
-      [Xml]$Xml = $XmlContent.ToString()
-      if($RemoveNamespace) {
-         $Xml = Remove-XmlNamespace -Xml $Xml
-      }
-      Select-Node $Xml $XPath  $NSM
-   }
-}
-
-}
+        }
+    }
+}}
 Set-Alias slxml Select-Xml -EA 0
+Set-Alias slx Select-Xml -EA 0
+
 
 function Update-Xml {
 #.Synopsis
@@ -205,93 +280,139 @@ function Update-Xml {
 #
 #.Notes
 #  We still need to implement RemoveNode and RemoveAttribute and even ReplaceNode
-[CmdletBinding(DefaultParameterSetName="Xml")]
+[CmdletBinding(DefaultParameterSetName="Set")]
 param(
-    # Specifies the path and file names of the XML files to search.  Wildcards are permitted.
-   [Parameter(Position=5,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("PSPath")]
-   [String[]]$Path
+    # Specifies an XPath for an element where you want to insert the new node.
+    [Parameter(ParameterSetName="Before",Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [Switch]$Before
 ,
-    #  Specifies one or more XML nodes to search.
-   [Parameter(Position=5,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("Node")]
-   [System.Xml.XmlNode[]]$Xml
+    # Specifies an XPath for an element where you want to insert the new node.
+    [Parameter(ParameterSetName="After",Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [Switch]$After
 ,
-    #  Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
-   [Parameter(ParameterSetName="Content",Mandatory=$true,ValueFromPipeline=$true)]
-   [ValidateNotNullOrEmpty()]
-   [String[]]$Content
+    # If set, the new value will be added as a new child of the node identified by the XPath
+    [Parameter(ParameterSetName="Append",Mandatory=$true)]
+    [Switch]$Append
 ,
-    #  Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
-   [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$false)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("Query")]
-   [String[]]$XPath
+    # If set, the node identified by the XPath will be removed instead of set
+    [Parameter(ParameterSetName="Remove",Mandatory=$true)]
+    [Switch]$Remove
 ,
-   #  The Attribute name (or "#text") for which the value is going to be replaced. Providing no value or an empty string results in replacing the InnerXml.
-   [Parameter(Position=1,Mandatory=$false,ValueFromPipeline=$false)]
-   [ValidateNotNullOrEmpty()]
-   [String[]]$Attribute
+    # If set, the node identified by the XPath will be Replace instead of set
+    [Parameter(ParameterSetName="Replace",Mandatory=$true)]
+    [Switch]$Replace
 ,
-   #  The value toreplace in the specified Attribute name
-   [Parameter(Position=2,Mandatory=$true,ValueFromPipeline=$false)]
-   [ValidateNotNullOrEmpty()]
-   [String]$Value
+    # Specifies an XPath for the node to update. This could be an element node *or* an attribute node (remember: //element/@attribute )
+    [Parameter(Position=1,Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [String[]]$XPath
 ,
-   #   Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
-   [Parameter(Mandatory=$false)]
-   [ValidateNotNullOrEmpty()]
-   [Hashtable]$Namespace
+    # The new value to place in the xml
+    [Parameter(Position=2,Mandatory=$true,ValueFromPipeline=$false)]
+    [ValidateNotNullOrEmpty()]
+    [String]$Value
 ,
-    #  Allows the execution of XPath queries without namespace qualifiers. 
-    #  
-    #  If you specify the -RemoveNamespace switch, all namespace declarations and prefixes are actually removed from the Xml before the XPath search query is evaluated, and your XPath query should therefore NOT contain any namespace prefixes.
-    # 
-    #  Note that this means that the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
-   [Switch]$RemoveNamespace
+    # Specifies one or more XML nodes to search.
+    [Parameter(Position=5,Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("Node")]
+    [System.Xml.XmlNode[]]$Xml
+,   
+    # Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
+    [Parameter(Position=10,Mandatory=$false)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("Ns")]
+    [Hashtable]$Namespace
+,   
+    # Output the XML documents after adding updating them
+    [Switch]$Passthru
 )
-   begin {
-      $null = $PSBoundParameters.Remove("Attribute")
-      $null = $PSBoundParameters.Remove("Value")
-      
-      $command = $ExecutionContext.InvokeCommand.GetCommand( "Select-Xml", [System.Management.Automation.CommandTypes]::Function )
-      $steppablePipeline = {& $command @PSBoundParameters | Write-Output }.GetSteppablePipeline($myInvocation.CommandOrigin)
-      $steppablePipeline.Begin($myInvocation.ExpectingInput)
-   }
-   process
-   {
-      Write-Verbose "Invoke-Autoloaded Process: $CommandName ($_)"
-      try {
-         foreach($node in $(if($_) { $steppablePipeline.Process($_) } else { $steppablePipeline.Process() })){
-            if($Attribute) {
-               $node.$Attribute = $Value
-            } else {
-               $node.Set_InnerXml($Value)
+process
+{
+    foreach($XmlNode in $Xml) {
+        $select = @{}
+        $select.Xml = $XmlNode
+        $select.XPath = $XPath
+        if($Namespace) {  
+            $select.Namespace = $Namespace
+        }
+        $document =
+            if($XmlNode -is [System.Xml.XmlDocument]) {
+                $XmlNode
+            } else { 
+                $XmlNode.get_OwnerDocument()
             }
-         }
-      } catch {
-         throw
-      }
-   }
+        if($xValue = $Value -as [Xml]) {
+            $xValue = $document.ImportNode($xValue.SelectSingleNode("/*"), $true)
+        }
+        $nodes = Select-Xml @Select | Where-Object { $_ }
 
-   end
-   {
-      try {
-         foreach($node in $steppablePipeline.End()) {
-            if($Attribute) {
-               $node.$Attribute = $Value
-            } else {
-               $node.Set_InnerXml($Value)
+        if(@($nodes).Count -eq 0) { Write-Warning "No nodes matched your XPath, nothing will be updated" }
+        
+        foreach($node in $nodes) {
+            $select.XPath = "$XPath/parent::*"
+            $parent = Select-Xml @Select
+            if(!$xValue) {
+                if($node -is [System.Xml.XmlAttribute] -and $Value.Contains("=")) {
+                    $aName, $aValue = $Value.Split("=",2)
+                    if($aName.Contains(":")){
+                        $ns,$name = $aName.Split(":",2)
+                        $xValue = $document.CreateAttribute( $name, $Namespace[$ns] )
+                    } else {
+                        $xValue = $document.CreateAttribute( $aName )
+                    }
+                    $xValue.Value = $aValue
+                }
             }
-         }
-      } catch {
-         throw
-      }
-      Write-Verbose "Invoke-Autoloaded End: $CommandName"
-   }
-}
+            
+            switch($PSCmdlet.ParameterSetName) {
+                "Before" {
+                    $null = $parent.InsertBefore( $xValue, $node )
+                }
+                "After" {
+                    $null = $parent.InsertAfter( $xValue, $node )
+                }
+                "Append" {
+                    $null = $parent.AppendChild( $xValue )
+                }
+                "Remove" {
+                    $null = $parent.RemoveChild( $node )
+                }
+                "Replace" {
+                    if(!$xValue) {
+                        $xValue = $document.CreateTextNode( $Value )
+                    }
+                    $null = $parent.ReplaceChild( $xValue, $node )
+                }
+                "Set" {
+                    if(!$xValue -and $node."#text") {
+                        $node."#text" = $Value
+                    } else {
+                        if($node -is [System.Xml.XmlElement]) {
+                            if(!$xValue) {
+                                $xValue = $document.CreateTextNode( $Value )
+                            }
+                            $null = $node.set_innerXml("")
+                            $null = $node.AppendChild($xValue)
+                        }
+                        elseif($node -is [System.Xml.XmlAttribute]) {
+                            $node.Value = $Value
+                        } else {
+                            Write-Warning "$XPath selects a node of type $($node.GetType()), which we haven't handled. Please add that handler!"
+                        }
+                    }
+                }
+            }
+        }
+        if($Passthru) {
+            Write-Output $XmlNode
+        }
+    }
+}}
+Set-Alias uxml Update-Xml -EA 0
+Set-Alias ux Update-Xml -EA 0
 
 function Convert-Node {
 #.Synopsis 
@@ -341,75 +462,41 @@ PROCESS {
 
 function Convert-Xml {
 #.Synopsis
-#  The Convert-XML function lets you use Xslt to transform XML strings and documents.
+#   The Convert-XML function lets you use Xslt to transform XML strings and documents.
 #.Description
-#.Parameter Content
-#  Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
-#.Parameter Namespace
-#   Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
-#.Parameter Path
-#   Specifies the path and file names of the XML files to search.  Wildcards are permitted.
-#.Parameter Xml
-#  Specifies one or more XML nodes to search.
-#.Parameter Xsl
-#  Specifies an Xml StyleSheet to transform with...
+#   Documentation TODO
 [CmdletBinding(DefaultParameterSetName="Xml")]
-PARAM(
-   [Parameter(Position=1,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("PSPath")]
-   [String[]]$Path
+param(
+    # Specifies one or more XML nodes to process.
+    [Parameter(Position=1,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("Node")]
+    [System.Xml.XmlNode[]]$Xml
+,   
+    # Specifies an Xml StyleSheet to transform with...
+    [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$false)]
+    [ValidateNotNullOrEmpty()]
+    [Alias("StyleSheet")]
+    [String]$Xslt
 ,
-   [Parameter(Position=1,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("Node")]
-   [System.Xml.XmlNode[]]$Xml
-,
-   [Parameter(ParameterSetName="Content",Mandatory=$true,ValueFromPipeline=$true)]
-   [ValidateNotNullOrEmpty()]
-   [String[]]$Content
-,
-   [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$false)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("StyleSheet")]
-   [String[]]$Xslt
-,
-   [Alias("Parameters")]
-   [hashtable]$Arguments   
+    # Specify arguments to the XSL Transformation
+    [Alias("Parameters")]
+    [hashtable]$Arguments
 )
-BEGIN { 
+begin { 
    $StyleSheet = New-Object System.Xml.Xsl.XslCompiledTransform
-   if(Test-Path @($Xslt)[0] -EA 0) { 
-      Write-Verbose "Loading Stylesheet from $(Resolve-Path @($Xslt)[0])"
-      $StyleSheet.Load( (Resolve-Path @($Xslt)[0]) )
+   if(Test-Path $Xslt -EA 0) { 
+      Write-Verbose "Loading Stylesheet from $(Resolve-Path $Xslt)"
+      $StyleSheet.Load( (Resolve-Path $Xslt) )
    } else {
       $OFS = "`n"
       Write-Verbose "$Xslt"
-      $StyleSheet.Load(([System.Xml.XmlReader]::Create((New-Object System.IO.StringReader "$Xslt" )) ))
-   }
-   [Text.StringBuilder]$XmlContent = [String]::Empty 
-}
-PROCESS {
-   switch($PSCmdlet.ParameterSetName) {
-      "Content" {
-         $null = $XmlContent.AppendLine( $Content -Join "`n" )
-      }
-      "Path" {
-         foreach($file in Get-ChildItem $Path) {
-            Convert-Node -Xml ([System.Xml.XmlReader]::Create((Resolve-Path $file))) $StyleSheet $Arguments
-         }
-      }
-      "Xml" {
-         foreach($node in $Xml) {
-            Convert-Node -Xml (New-Object Xml.XmlNodeReader $node) $StyleSheet $Arguments
-         }
-      }
+      $StyleSheet.Load(([System.Xml.XmlReader]::Create((New-Object System.IO.StringReader $Xslt))))
    }
 }
-END {
-   if($PSCmdlet.ParameterSetName -eq "Content") {
-      [Xml]$Xml = $XmlContent.ToString()
-      Convert-Node -Node $Xml $StyleSheet $Arguments
+process {
+   foreach($node in $Xml) {
+      Convert-Node -Xml (New-Object Xml.XmlNodeReader $node) $StyleSheet $Arguments
    }
 }
 }
@@ -431,24 +518,10 @@ function Remove-XmlNamespace {
 #  Specifies one or more XML documents to transform
 [CmdletBinding(DefaultParameterSetName="Xml")]
 PARAM(
-   [Parameter(Position=1,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
-   [ValidateNotNullOrEmpty()]
-   [Alias("PSPath")]
-   [String[]]$Path
-,
    [Parameter(Position=1,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
    [ValidateNotNullOrEmpty()]
    [Alias("Node")]
    [System.Xml.XmlNode[]]$Xml
-,
-   [Parameter(ParameterSetName="Content",Mandatory=$true,ValueFromPipeline=$true)]
-   [ValidateNotNullOrEmpty()]
-   [String[]]$Content
-#,
-#   [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$false)]
-#   [ValidateNotNullOrEmpty()]
-#   [Alias("StyleSheet")]
-#   [String[]]$Xslt
 )
 BEGIN { 
    $StyleSheet = New-Object System.Xml.Xsl.XslCompiledTransform
@@ -477,29 +550,11 @@ BEGIN {
    [Text.StringBuilder]$XmlContent = [String]::Empty 
 }
 PROCESS {
-   switch($PSCmdlet.ParameterSetName) {
-      "Content" {
-         $null = $XmlContent.AppendLine( $Content -Join "`n" )
-      }
-      "Path" {
-         foreach($file in Get-ChildItem $Path) {
-            [Xml]$Xml = Get-Content $file
-            Convert-Node -Node $Xml $StyleSheet
-         }
-      }
-      "Xml" {
-         $Xml | Convert-Node $StyleSheet
-      }
-   }
-}
-END {
-   if($PSCmdlet.ParameterSetName -eq "Content") {
-      [Xml]$Xml = $XmlContent.ToString()
-      Convert-Node -Node $Xml $StyleSheet
-   }
+   $Xml | Convert-Node $StyleSheet
 }
 }
 Set-Alias rmns Remove-XmlNamespace -EA 0
+Set-Alias rmxns Remove-XmlNamespace -EA 0
 
 ######## Helper functions for working with CliXml
 
@@ -776,18 +831,6 @@ Param(
    [Parameter(Position=99, Mandatory = $false, ValueFromRemainingArguments=$true)]
    [PSObject[]]$args
 )
-#  BEGIN {
-   #  if([string]::IsNullOrEmpty( $tag.NamespaceName )) {
-      #  $tag = $($script:NameSpaceStack.Peek()) + $tag
-      #  if( $script:NameSpaceStack.Count -gt 0 ) {
-         #  $script:NameSpaceStack.Push( $script:NameSpaceStack.Peek() )
-      #  } else {
-         #  $script:NameSpaceStack.Push( $null )
-      #  }      
-   #  } else {
-      #  $script:NameSpaceStack.Push( $tag.Namespace )
-   #  }
-#  }
 PROCESS {
   New-Object XElement $(
      $tag
@@ -809,9 +852,6 @@ PROCESS {
      }
    )
 }
-#  END {
-   #  $null = $script:NameSpaceStack.Pop()
-#  }
 }
 Set-Alias xe New-XElement
 Set-Alias New-XmlElement New-XElement
@@ -850,98 +890,51 @@ Param([ScriptBlock]$script)
    #  }
 #  }
    
-Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Convert-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml
+Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Import-Xml, Export-Xml, ConvertTo-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml
 
 # SIG # Begin signature block
-# MIIRDAYJKoZIhvcNAQcCoIIQ/TCCEPkCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
+# MIIIDQYJKoZIhvcNAQcCoIIH/jCCB/oCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU+W/LVKaLu6n+Wgl15WXeZ6ul
-# qS2ggg5CMIIHBjCCBO6gAwIBAgIBFTANBgkqhkiG9w0BAQUFADB9MQswCQYDVQQG
-# EwJJTDEWMBQGA1UEChMNU3RhcnRDb20gTHRkLjErMCkGA1UECxMiU2VjdXJlIERp
-# Z2l0YWwgQ2VydGlmaWNhdGUgU2lnbmluZzEpMCcGA1UEAxMgU3RhcnRDb20gQ2Vy
-# dGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMDcxMDI0MjIwMTQ1WhcNMTIxMDI0MjIw
-# MTQ1WjCBjDELMAkGA1UEBhMCSUwxFjAUBgNVBAoTDVN0YXJ0Q29tIEx0ZC4xKzAp
-# BgNVBAsTIlNlY3VyZSBEaWdpdGFsIENlcnRpZmljYXRlIFNpZ25pbmcxODA2BgNV
-# BAMTL1N0YXJ0Q29tIENsYXNzIDIgUHJpbWFyeSBJbnRlcm1lZGlhdGUgT2JqZWN0
-# IENBMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyiOLIjUemqAbPJ1J
-# 0D8MlzgWKbr4fYlbRVjvhHDtfhFN6RQxq0PjTQxRgWzwFQNKJCdU5ftKoM5N4YSj
-# Id6ZNavcSa6/McVnhDAQm+8H3HWoD030NVOxbjgD/Ih3HaV3/z9159nnvyxQEckR
-# ZfpJB2Kfk6aHqW3JnSvRe+XVZSufDVCe/vtxGSEwKCaNrsLc9pboUoYIC3oyzWoU
-# TZ65+c0H4paR8c8eK/mC914mBo6N0dQ512/bkSdaeY9YaQpGtW/h/W/FkbQRT3sC
-# pttLVlIjnkuY4r9+zvqhToPjxcfDYEf+XD8VGkAqle8Aa8hQ+M1qGdQjAye8OzbV
-# uUOw7wIDAQABo4ICfzCCAnswDAYDVR0TBAUwAwEB/zALBgNVHQ8EBAMCAQYwHQYD
-# VR0OBBYEFNBOD0CZbLhLGW87KLjg44gHNKq3MIGoBgNVHSMEgaAwgZ2AFE4L7xqk
-# QFulF2mHMMo0aEPQQa7yoYGBpH8wfTELMAkGA1UEBhMCSUwxFjAUBgNVBAoTDVN0
-# YXJ0Q29tIEx0ZC4xKzApBgNVBAsTIlNlY3VyZSBEaWdpdGFsIENlcnRpZmljYXRl
-# IFNpZ25pbmcxKTAnBgNVBAMTIFN0YXJ0Q29tIENlcnRpZmljYXRpb24gQXV0aG9y
-# aXR5ggEBMAkGA1UdEgQCMAAwPQYIKwYBBQUHAQEEMTAvMC0GCCsGAQUFBzAChiFo
-# dHRwOi8vd3d3LnN0YXJ0c3NsLmNvbS9zZnNjYS5jcnQwYAYDVR0fBFkwVzAsoCqg
-# KIYmaHR0cDovL2NlcnQuc3RhcnRjb20ub3JnL3Nmc2NhLWNybC5jcmwwJ6AloCOG
-# IWh0dHA6Ly9jcmwuc3RhcnRzc2wuY29tL3Nmc2NhLmNybDCBggYDVR0gBHsweTB3
-# BgsrBgEEAYG1NwEBBTBoMC8GCCsGAQUFBwIBFiNodHRwOi8vY2VydC5zdGFydGNv
-# bS5vcmcvcG9saWN5LnBkZjA1BggrBgEFBQcCARYpaHR0cDovL2NlcnQuc3RhcnRj
-# b20ub3JnL2ludGVybWVkaWF0ZS5wZGYwEQYJYIZIAYb4QgEBBAQDAgABMFAGCWCG
-# SAGG+EIBDQRDFkFTdGFydENvbSBDbGFzcyAyIFByaW1hcnkgSW50ZXJtZWRpYXRl
-# IE9iamVjdCBTaWduaW5nIENlcnRpZmljYXRlczANBgkqhkiG9w0BAQUFAAOCAgEA
-# UKLQmPRwQHAAtm7slo01fXugNxp/gTJY3+aIhhs8Gog+IwIsT75Q1kLsnnfUQfbF
-# pl/UrlB02FQSOZ+4Dn2S9l7ewXQhIXwtuwKiQg3NdD9tuA8Ohu3eY1cPl7eOaY4Q
-# qvqSj8+Ol7f0Zp6qTGiRZxCv/aNPIbp0v3rD9GdhGtPvKLRS0CqKgsH2nweovk4h
-# fXjRQjp5N5PnfBW1X2DCSTqmjweWhlleQ2KDg93W61Tw6M6yGJAGG3GnzbwadF9B
-# UW88WcRsnOWHIu1473bNKBnf1OKxxAQ1/3WwJGZWJ5UxhCpA+wr+l+NbHP5x5XZ5
-# 8xhhxu7WQ7rwIDj8d/lGU9A6EaeXv3NwwcbIo/aou5v9y94+leAYqr8bbBNAFTX1
-# pTxQJylfsKrkB8EOIx+Zrlwa0WE32AgxaKhWAGho/Ph7d6UXUSn5bw2+usvhdkW4
-# npUoxAk3RhT3+nupi1fic4NG7iQG84PZ2bbS5YxOmaIIsIAxclf25FwssWjieMwV
-# 0k91nlzUFB1HQMuE6TurAakS7tnIKTJ+ZWJBDduUbcD1094X38OvMO/++H5S45Ki
-# 3r/13YTm0AWGOvMFkEAF8LbuEyecKTaJMTiNRfBGMgnqGBfqiOnzxxRVNOw2hSQp
-# 0B+C9Ij/q375z3iAIYCbKUd/5SSELcmlLl+BuNknXE0wggc0MIIGHKADAgECAgFR
-# MA0GCSqGSIb3DQEBBQUAMIGMMQswCQYDVQQGEwJJTDEWMBQGA1UEChMNU3RhcnRD
-# b20gTHRkLjErMCkGA1UECxMiU2VjdXJlIERpZ2l0YWwgQ2VydGlmaWNhdGUgU2ln
-# bmluZzE4MDYGA1UEAxMvU3RhcnRDb20gQ2xhc3MgMiBQcmltYXJ5IEludGVybWVk
-# aWF0ZSBPYmplY3QgQ0EwHhcNMDkxMTExMDAwMDAxWhcNMTExMTExMDYyODQzWjCB
-# qDELMAkGA1UEBhMCVVMxETAPBgNVBAgTCE5ldyBZb3JrMRcwFQYDVQQHEw5XZXN0
-# IEhlbnJpZXR0YTEtMCsGA1UECxMkU3RhcnRDb20gVmVyaWZpZWQgQ2VydGlmaWNh
-# dGUgTWVtYmVyMRUwEwYDVQQDEwxKb2VsIEJlbm5ldHQxJzAlBgkqhkiG9w0BCQEW
-# GEpheWt1bEBIdWRkbGVkTWFzc2VzLm9yZzCCASIwDQYJKoZIhvcNAQEBBQADggEP
-# ADCCAQoCggEBAMfjItJjMWVaQTECvnV/swHQP0FTYUvRizKzUubGNDNaj7v2dAWC
-# rAA+XE0lt9JBNFtCCcweDzphbWU/AAY0sEPuKobV5UGOLJvW/DcHAWdNB/wRrrUD
-# dpcsapQ0IxxKqpRTrbu5UGt442+6hJReGTnHzQbX8FoGMjt7sLrHc3a4wTH3nMc0
-# U/TznE13azfdtPOfrGzhyBFJw2H1g5Ag2cmWkwsQrOBU+kFbD4UjxIyus/Z9UQT2
-# R7bI2R4L/vWM3UiNj4M8LIuN6UaIrh5SA8q/UvDumvMzjkxGHNpPZsAPaOS+RNmU
-# Go6X83jijjbL39PJtMX+doCjS/lnclws5lUCAwEAAaOCA4EwggN9MAkGA1UdEwQC
-# MAAwDgYDVR0PAQH/BAQDAgeAMDoGA1UdJQEB/wQwMC4GCCsGAQUFBwMDBgorBgEE
-# AYI3AgEVBgorBgEEAYI3AgEWBgorBgEEAYI3CgMNMB0GA1UdDgQWBBR5tWPGCLNQ
-# yCXI5fY5ViayKj6xATCBqAYDVR0jBIGgMIGdgBTQTg9AmWy4SxlvOyi44OOIBzSq
-# t6GBgaR/MH0xCzAJBgNVBAYTAklMMRYwFAYDVQQKEw1TdGFydENvbSBMdGQuMSsw
-# KQYDVQQLEyJTZWN1cmUgRGlnaXRhbCBDZXJ0aWZpY2F0ZSBTaWduaW5nMSkwJwYD
-# VQQDEyBTdGFydENvbSBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eYIBFTCCAUIGA1Ud
-# IASCATkwggE1MIIBMQYLKwYBBAGBtTcBAgEwggEgMC4GCCsGAQUFBwIBFiJodHRw
-# Oi8vd3d3LnN0YXJ0c3NsLmNvbS9wb2xpY3kucGRmMDQGCCsGAQUFBwIBFihodHRw
-# Oi8vd3d3LnN0YXJ0c3NsLmNvbS9pbnRlcm1lZGlhdGUucGRmMIG3BggrBgEFBQcC
-# AjCBqjAUFg1TdGFydENvbSBMdGQuMAMCAQEagZFMaW1pdGVkIExpYWJpbGl0eSwg
-# c2VlIHNlY3Rpb24gKkxlZ2FsIExpbWl0YXRpb25zKiBvZiB0aGUgU3RhcnRDb20g
-# Q2VydGlmaWNhdGlvbiBBdXRob3JpdHkgUG9saWN5IGF2YWlsYWJsZSBhdCBodHRw
-# Oi8vd3d3LnN0YXJ0c3NsLmNvbS9wb2xpY3kucGRmMGMGA1UdHwRcMFowK6ApoCeG
-# JWh0dHA6Ly93d3cuc3RhcnRzc2wuY29tL2NydGMyLWNybC5jcmwwK6ApoCeGJWh0
-# dHA6Ly9jcmwuc3RhcnRzc2wuY29tL2NydGMyLWNybC5jcmwwgYkGCCsGAQUFBwEB
-# BH0wezA3BggrBgEFBQcwAYYraHR0cDovL29jc3Auc3RhcnRzc2wuY29tL3N1Yi9j
-# bGFzczIvY29kZS9jYTBABggrBgEFBQcwAoY0aHR0cDovL3d3dy5zdGFydHNzbC5j
-# b20vY2VydHMvc3ViLmNsYXNzMi5jb2RlLmNhLmNydDAjBgNVHRIEHDAahhhodHRw
-# Oi8vd3d3LnN0YXJ0c3NsLmNvbS8wDQYJKoZIhvcNAQEFBQADggEBACY+J88ZYr5A
-# 6lYz/L4OGILS7b6VQQYn2w9Wl0OEQEwlTq3bMYinNoExqCxXhFCHOi58X6r8wdHb
-# E6mU8h40vNYBI9KpvLjAn6Dy1nQEwfvAfYAL8WMwyZykPYIS/y2Dq3SB2XvzFy27
-# zpIdla8qIShuNlX22FQL6/FKBriy96jcdGEYF9rbsuWku04NqSLjNM47wCAzLs/n
-# FXpdcBL1R6QEK4MRhcEL9Ho4hGbVvmJES64IY+P3xlV2vlEJkk3etB/FpNDOQf8j
-# RTXrrBUYFvOCv20uHsRpc3kFduXt3HRV2QnAlRpG26YpZN4xvgqSGXUeqRceef7D
-# dm4iTdHK5tIxggI0MIICMAIBATCBkjCBjDELMAkGA1UEBhMCSUwxFjAUBgNVBAoT
-# DVN0YXJ0Q29tIEx0ZC4xKzApBgNVBAsTIlNlY3VyZSBEaWdpdGFsIENlcnRpZmlj
-# YXRlIFNpZ25pbmcxODA2BgNVBAMTL1N0YXJ0Q29tIENsYXNzIDIgUHJpbWFyeSBJ
-# bnRlcm1lZGlhdGUgT2JqZWN0IENBAgFRMAkGBSsOAwIaBQCgeDAYBgorBgEEAYI3
-# AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisG
-# AQQBgjcCAQsxDjAMBgorBgEEAYI3AgEWMCMGCSqGSIb3DQEJBDEWBBSg2DWYYgWq
-# 6pyxukc314L3m5t3ITANBgkqhkiG9w0BAQEFAASCAQCpGT09SsMDF6YhBqX8bBah
-# Y16E/29IvPFYmtpmrvvj4PkMS6rBO8vYWAhOwzUZntv56y2e0r9f6WwRHRvL20ya
-# Do6I2Rtv+wCJBjE3Mzjhb5WPO54a463ZaSHoE2KAPxlVHq1IN91OA1YMSbb3zy4p
-# xQGrNFHUe4Y4r3Buy8utnKkrJ9NR7deYXY30aowIYbRqaPlKKpiNkdqHvlNZjgVV
-# O0r8FEgk85KIhSNlwtMyiDffWi2OoQ9jADSSOQyvayqhGNpeg5GcDyWUC3DFqJgt
-# SzZ3wtECmjSUNABUornTKCHwNGOs67b3kkIz49sP273xQDaydYghe24JcDpmets7
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUiMRLI7iLPeWuXLdb7lMdZlym
+# fzCgggUrMIIFJzCCBA+gAwIBAgIQHCAgf57pVOnJcjKrMO/dtjANBgkqhkiG9w0B
+# AQUFADCBlTELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAlVUMRcwFQYDVQQHEw5TYWx0
+# IExha2UgQ2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMSEwHwYD
+# VQQLExhodHRwOi8vd3d3LnVzZXJ0cnVzdC5jb20xHTAbBgNVBAMTFFVUTi1VU0VS
+# Rmlyc3QtT2JqZWN0MB4XDTExMDQyNTAwMDAwMFoXDTEyMDQyNDIzNTk1OVowgZUx
+# CzAJBgNVBAYTAlVTMQ4wDAYDVQQRDAUwNjg1MDEUMBIGA1UECAwLQ29ubmVjdGlj
+# dXQxEDAOBgNVBAcMB05vcndhbGsxFjAUBgNVBAkMDTQ1IEdsb3ZlciBBdmUxGjAY
+# BgNVBAoMEVhlcm94IENvcnBvcmF0aW9uMRowGAYDVQQDDBFYZXJveCBDb3Jwb3Jh
+# dGlvbjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANaXR+8W+aH6ofiO
+# bZRdIRBuvemJ/8c2fDwbHVLBMieiG9Eqs5+XKZ3M17Sz8GBNzQ4bluk2esIycr9z
+# yR/ISBjVxz1RcxH79vuvM6husOAKc2YhnGqA6vmfWokmEfDrOH1qLKA4226tPXBE
+# eNTSDrYtXFZ6jYWv9kqGcRMBzV7NPvJwQoMDEl1dbNAXo99RaHGjAfVkCSNYMM11
+# jzZ2/DyAqVgKVnNviRQ+Wq8HPxP7Eqg/6b2DVw1Nokg3IDeyFRlo2he09YwVEV+r
+# GLvjUBmVRQPauJIr1EUgz85byWtYAUWOXNIFiWrqOKj/Clvi5Y9M05a1TwSi4o0F
+# yfa4keECAwEAAaOCAW8wggFrMB8GA1UdIwQYMBaAFNrtZHQUnBQ8q92Zqb1bKE2L
+# PMnYMB0GA1UdDgQWBBTKaDgQ0lToUHAI+jy/CDn0BluXFjAOBgNVHQ8BAf8EBAMC
+# B4AwDAYDVR0TAQH/BAIwADATBgNVHSUEDDAKBggrBgEFBQcDAzARBglghkgBhvhC
+# AQEEBAMCBBAwRgYDVR0gBD8wPTA7BgwrBgEEAbIxAQIBAwIwKzApBggrBgEFBQcC
+# ARYdaHR0cHM6Ly9zZWN1cmUuY29tb2RvLm5ldC9DUFMwQgYDVR0fBDswOTA3oDWg
+# M4YxaHR0cDovL2NybC51c2VydHJ1c3QuY29tL1VUTi1VU0VSRmlyc3QtT2JqZWN0
+# LmNybDA0BggrBgEFBQcBAQQoMCYwJAYIKwYBBQUHMAGGGGh0dHA6Ly9vY3NwLmNv
+# bW9kb2NhLmNvbTAhBgNVHREEGjAYgRZKb2VsLkJlbm5ldHRAeGVyb3guY29tMA0G
+# CSqGSIb3DQEBBQUAA4IBAQAzwUwy00sEOggAavqrNoNeEVr0o623DgG2/2EuTsA6
+# 2wI0Arb5D0s/icanshHgWwJZBEMZeHa17Ai/E3foCpj6rA3Y4vIQXHukluiSmjU6
+# bWTgF5VbNTpvhlOO6E7Ya/rBr4oj4dqTEErkS7acgBHKrjPOptCiU4BSDqtl0k5z
+# OIiawyRSITHYEcCcI0Yl7VIz8EDblOQI3b4JGYcmJ7D+peYrnI2zoQyXDigcIj4l
+# VlipnjnvYsF+JbPkQY8XbMO+Yc490Bh8BMXPtuLR1KMuIXPK7DKX7JPmJcY7kKF/
+# SPviyk0HE7Rldsses73UF8wT3lgj57FiUqX8FdTa7NllMYICTDCCAkgCAQEwgaow
+# gZUxCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJVVDEXMBUGA1UEBxMOU2FsdCBMYWtl
+# IENpdHkxHjAcBgNVBAoTFVRoZSBVU0VSVFJVU1QgTmV0d29yazEhMB8GA1UECxMY
+# aHR0cDovL3d3dy51c2VydHJ1c3QuY29tMR0wGwYDVQQDExRVVE4tVVNFUkZpcnN0
+# LU9iamVjdAIQHCAgf57pVOnJcjKrMO/dtjAJBgUrDgMCGgUAoHgwGAYKKwYBBAGC
+# NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG9w0BCQQxFgQUgc2AkVqE
+# EN849j8G0GohLlwueJ4wDQYJKoZIhvcNAQEBBQAEggEALsDFBvLn1SEBk+fyLgHL
+# ibkAHDtrWMwfSLvOv3Sw61Oa+mviJp8H0pODa+3zfJxEoRa0JHYWUSMutNG0CIg9
+# YiEf1HLNoYam9s9rtR9YWdv9wx3CkU9Ci2yGfB4oEc1eCg/1prEHG7XWjqZDC6uG
+# vhFUNDHp9sWSF/ruVS3RBEm2VBJkvehpIsB4WsQ0aunDhsU4t2oFnFYC0leaasFy
+# rLNzzj9T4CZFydtTVh5xvXG0lWv5SMNhqegYjl+gfxGxrLBrNZiCTkC8vX2c5EHN
+# AhsqD53tH0wpC+icLoK+f/DPzi6xqJVOaQ1oruFk94RYNRAFGcgWInqKc2Gvsf6P
+# rA==
 # SIG # End signature block
