@@ -1,6 +1,6 @@
 #requires -version 2.0
 
-# Improves over the built-in Select-XML by leveraging Remove-XmlNamespace http://poshcode.org/1492 
+# Improves over the built-in Select-XML by leveraging Remove-XmlNamespace http`://poshcode.org/1492 
 # to provide a -RemoveNamespace parameter -- if it's supplied, all of the namespace declarations 
 # and prefixes are removed from all XML nodes (by an XSL transform) before searching. 
 # IMPORTANT: returned results *will not* have namespaces in them, even if the input XML did. 
@@ -17,6 +17,7 @@
 # Version    3.0 Added New-XDocument and associated generation functions for my XML DSL
 # Version    3.1 Fixed a really ugly bug in New-XDocument in 3.0 which I should not have released
 # Version    4.0 Never content to leave well enough alone, I've completely reworked New-XDocument
+# Version    4.1 Tweaked namespaces again so they don't cascade down when they shouldn't. Got rid of the unnecessary stack.
 
 $xlr8r = [type]::gettype("System.Management.Automation.TypeAccelerators")
 $xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
@@ -441,9 +442,9 @@ function New-XDocument {
 # 		id {"http`://huddledmasses.org/new-site-new-layout-lost-posts/" }
 # 		updated {(Get-Date 10/31/2003 -f u) -replace " ","T"}
 # 		summary {"Ema Lazarus' Poem"}
-# 		link -rel license -href "http://creativecommons.org/licenses/by/3.0/" -title "CC By-Attribution"
+# 		link -rel license -href "http`://creativecommons.org/licenses/by/3.0/" -title "CC By-Attribution"
 # 		dc:rights { "Copyright 2009, Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)" }
-#       category -scheme "http://huddledmasses.org/tag/" -term "huddled-masses"
+#       category -scheme "http`://huddledmasses.org/tag/" -term "huddled-masses"
 # 	}
 # } | % { $_.Declaration.ToString(); $_.ToString() }
 #
@@ -492,17 +493,11 @@ Param(
 )
 BEGIN {
    $script:NameSpaceHash = New-Object 'Dictionary[String,XNamespace]'
-   $script:NameSpaceStack = New-Object 'Stack[XNamespace]'
-   if(![string]::IsNullOrEmpty( $root.NamespaceName )) {
-		$script:NameSpaceStack.Push( $root.Namespace )
-   } elseif( $script:NameSpaceStack.Count -gt 0 ) {
-      $script:NameSpaceStack.Push( $script:NameSpaceStack.Peek() )
-   } else {
-      $script:NameSpaceStack.Push( $null )
-	}
+   if($root.NamespaceName) {
+      $script:NameSpaceHash.Add("", $root.Namespace)
+   }
 }
 PROCESS {
-   #New-Object XDocument (New-Object XDeclaration "1.0", "UTF-8", "yes"),(
    New-Object XDocument (New-Object XDeclaration $Version, $Encoding, $standalone),(
       New-Object XElement $(
          $root
@@ -517,6 +512,7 @@ PROCESS {
                $value = DSL $value
                &$value
             } elseif ( $value -is [XNamespace]) {
+               Write-Host "Namespace: $value" -Fore Green
                New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-")), $value
                $script:NameSpaceHash.Add($attrib.TrimStart("-"), $value)
             } else {
@@ -524,9 +520,6 @@ PROCESS {
             }
          }
       ))
-}
-END {
-   $null = $script:NameSpaceStack.Pop()
 }
 }
 
@@ -565,18 +558,18 @@ Param(
    [Parameter(Position=99, Mandatory = $false, ValueFromRemainingArguments=$true)]
    [PSObject[]]$args
 )
-BEGIN {
-	if([string]::IsNullOrEmpty( $tag.NamespaceName )) {
-		$tag = $($script:NameSpaceStack.Peek()) + $tag
-      if( $script:NameSpaceStack.Count -gt 0 ) {
-         $script:NameSpaceStack.Push( $script:NameSpaceStack.Peek() )
-      } else {
-         $script:NameSpaceStack.Push( $null )
-      }      
-	} else {
-      $script:NameSpaceStack.Push( $tag.Namespace )
-	}
-}
+#  BEGIN {
+	#  if([string]::IsNullOrEmpty( $tag.NamespaceName )) {
+		#  $tag = $($script:NameSpaceStack.Peek()) + $tag
+      #  if( $script:NameSpaceStack.Count -gt 0 ) {
+         #  $script:NameSpaceStack.Push( $script:NameSpaceStack.Peek() )
+      #  } else {
+         #  $script:NameSpaceStack.Push( $null )
+      #  }      
+	#  } else {
+      #  $script:NameSpaceStack.Push( $tag.Namespace )
+	#  }
+#  }
 PROCESS {
   New-Object XElement $(
      $tag
@@ -595,9 +588,9 @@ PROCESS {
      }
    )
 }
-END {
-   $null = $script:NameSpaceStack.Pop()
-}
+#  END {
+   #  $null = $script:NameSpaceStack.Pop()
+#  }
 }
 Set-Alias xe New-XElement
 Set-Alias New-XmlElement New-XElement
@@ -617,6 +610,8 @@ Param([ScriptBlock]$script)
       if( $token.Content.Contains(":") ) {
          $key, $localname = $token.Content -split ":"
          $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[$key] + $localname) + "'" )
+      } else {
+         $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[''] + $token.Content) + "'" )
       }
       # insert 'xe' before everything (unless it's a valid command)
       $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Insert( $token.StartColumn -1, "xe " )
