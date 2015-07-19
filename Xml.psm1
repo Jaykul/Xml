@@ -34,23 +34,82 @@
 #       - Added Get-XmlContent and Set-XmlContent for loading/saving XML from files or strings
 #       - Removed Path and Content parameters from the other functions (it greatly simplifies thost functions, and makes the whole thing more maintainable)
 #       - Updated Update-Xml to support adding nodes "before" and "after" other nodes, and to support "remove"ing nodes
+# Version    6.1 Update for PowerShell 3.0
+
+function Add-Accelerator {
+<#
+   .Synopsis
+      Add a type accelerator to the current session
+   .Description
+      The Add-Accelerator function allows you to add a simple type accelerator (like [regex]) for a longer type (like [System.Text.RegularExpressions.Regex]).
+   .Example
+      Add-Accelerator list System.Collections.Generic.List``1
+      $list = New-Object list[string]
+      
+      Creates an accelerator for the generic List[T] collection type, and then creates a list of strings.
+   .Example
+      Add-Accelerator "List T", "GList" System.Collections.Generic.List``1
+      $list = New-Object "list t[string]"
+      
+      Creates two accelerators for the Generic List[T] collection type.
+   .Parameter Accelerator
+      The short form accelerator should be just the name you want to use (without square brackets).
+   .Parameter Type
+      The type you want the accelerator to accelerate (without square brackets)
+   .Notes
+      When specifying multiple values for a parameter, use commas to separate the values. 
+      For example, "-Accelerator string, regex".
+      
+      PowerShell requires arguments that are "types" to NOT have the square bracket type notation, because of the way the parsing engine works.  You can either just type in the type as System.Int64, or you can put parentheses around it to help the parser out: ([System.Int64])
+
+      Also see the help for Get-Accelerator and Remove-Accelerator
+   .Link
+      http://huddledmasses.org/powershell-2-ctp3-custom-accelerators-finally/
+#>
+[CmdletBinding()]
+param(
+   [Parameter(Position=0,ValueFromPipelineByPropertyName=$true)]
+   [Alias("Key","Name")]
+   [string[]]$Accelerator
+,
+   [Parameter(Position=1,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+   [Alias("Value","FullName")]
+   [type]$Type
+)
+process {
+   # add a user-defined accelerator  
+   foreach($a in $Accelerator) { 
+      if($xlr8r::AddReplace) { 
+         $xlr8r::AddReplace( $a, $Type) 
+      } else {
+         $null = $xlr8r::Remove( $a )
+         $xlr8r::Add( $a, $Type)
+      }
+      trap [System.Management.Automation.MethodInvocationException] {
+         if($xlr8r::get.keys -contains $a) {
+            if($xlr8r::get[$a] -ne $Type) {
+               Write-Error "Cannot add accelerator [$a] for [$($Type.FullName)]`n                  [$a] is already defined as [$($xlr8r::get[$a].FullName)]"
+            }
+            Continue;
+         } 
+         throw
+      }
+   }
+}
+}
+
 &{ 
 $local:xlr8r = [psobject].assembly.gettype("System.Management.Automation.TypeAccelerators")
 $local:xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
-$xlinq.GetTypes() | ? { $_.IsPublic -and !$_.IsSerializable -and $_.Name -ne "Extensions" -and !$xlr8r::Get[$_.Name] } | % {
-  $xlr8r::Add( $_.Name, $_.FullName )
-}
+$xlinq.GetTypes() | ? { $_.IsPublic -and !$_.IsSerializable -and $_.Name -ne "Extensions" -and !$xlr8r::Get[$_.Name] } | Add-Accelerator
 
-if(!$xlr8r::Get["Dictionary"]) {
-   $xlr8r::Add( "Dictionary", "System.Collections.Generic.Dictionary``2, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" )
-}
-if(!$xlr8r::Get["PSParser"]) {
-   $xlr8r::Add( "PSParser", "System.Management.Automation.PSParser, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35" )
-}
+Add-Accelerator "Dictionary" "System.Collections.Generic.Dictionary``2, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+Add-Accelerator "Dictionary", "System.Collections.Generic.Dictionary``2, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
+Add-Accelerator "PSParser", "System.Management.Automation.PSParser, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35"
 }
 
 
-function Import-Xml {
+function Get-XmlContent {
 #.Synopsis
 #   Load an XML file as an XmlDocument
 param(
@@ -71,8 +130,9 @@ begin {
 process {
     if($Path -and ($Path = Test-Path @($Content)[0] -EA 0)) { 
         foreach($file in Resolve-Path $Content) {
-            $xml = New-Object System.Xml.XmlDocument; 
+            $xml = New-Object System.Xml.XmlDocument;
             if($file.Provider.Name -eq "FileSystem") {
+                Write-Verbose $file.ProviderPath
                 $xml.Load( $file.ProviderPath )
             } else {
                 $ofs = "`n"
@@ -100,13 +160,16 @@ end {
         Write-Output $xml
     }
 }}
-Set-Alias ipxml Import-Xml
-Set-Alias ipx Import-Xml
-Set-Alias Get-Xml Import-Xml
-Set-Alias gxml Import-Xml
-Set-Alias gx Import-Xml
 
-function Export-Xml {
+
+Set-Alias Import-Xml Get-XmlContent
+Set-Alias ipxml Get-XmlContent
+Set-Alias ipx Get-XmlContent
+Set-Alias Get-Xml Get-XmlContent
+Set-Alias gxml Get-XmlContent
+Set-Alias gx Get-XmlContent
+
+function Set-XmlContent {
 param(
     [Parameter(Mandatory=$true, Position=1)]
     [Alias("PSPath")]
@@ -122,11 +185,13 @@ process {
     $xml.Save( $Path )
 }
 }
-Set-Alias epxml Export-Xml
-Set-Alias epx Export-Xml
-Set-Alias Set-Xml Export-Xml
-Set-Alias sxml Export-Xml
-Set-Alias sx Export-Xml
+
+Set-Alias Export-Xml Set-XmlContent
+Set-Alias epxml Set-XmlContent
+Set-Alias epx Set-XmlContent
+Set-Alias Set-Xml Set-XmlContent
+Set-Alias sxml Set-XmlContent
+Set-Alias sx Set-XmlContent
 
 function Format-Xml {
 #.Synopsis
@@ -575,7 +640,7 @@ function ConvertFrom-CliXml {
    }
    end
    {
-      $type = [type]::gettype("System.Management.Automation.Deserializer")
+      $type = [psobject].assembly.gettype("System.Management.Automation.Deserializer")
       $ctor = $type.getconstructor("instance,nonpublic", $null, @([xml.xmlreader]), $null)
       $sr = new-object System.IO.StringReader $xmlString
       $xr = new-object System.Xml.XmlTextReader $sr
@@ -587,7 +652,7 @@ function ConvertFrom-CliXml {
          try {
             $method.invoke($deserializer, "")
          } catch {
-            write-warning "Could not deserialize $string: $_"
+            write-warning "Could not deserialize ${string}: $_"
          }
       }
       $xr.Close()
@@ -602,7 +667,7 @@ function ConvertTo-CliXml {
       [PSObject[]]$InputObject
    )
    begin {
-      $type = [type]::gettype("System.Management.Automation.Serializer")
+      $type = [psobject].assembly.gettype("System.Management.Automation.Serializer")
       $ctor = $type.getconstructor("instance,nonpublic", $null, @([System.Xml.XmlWriter]), $null)
       $sw = new-object System.IO.StringWriter
       $xw = new-object System.Xml.XmlTextWriter $sw
@@ -890,51 +955,164 @@ Param([ScriptBlock]$script)
    #  }
 #  }
    
-Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Import-Xml, Export-Xml, ConvertTo-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml
+Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Get-XmlContent, Set-XmlContent, ConvertTo-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml
 
 # SIG # Begin signature block
-# MIIIDQYJKoZIhvcNAQcCoIIH/jCCB/oCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
+# MIIdZgYJKoZIhvcNAQcCoIIdVzCCHVMCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUiMRLI7iLPeWuXLdb7lMdZlym
-# fzCgggUrMIIFJzCCBA+gAwIBAgIQHCAgf57pVOnJcjKrMO/dtjANBgkqhkiG9w0B
-# AQUFADCBlTELMAkGA1UEBhMCVVMxCzAJBgNVBAgTAlVUMRcwFQYDVQQHEw5TYWx0
-# IExha2UgQ2l0eTEeMBwGA1UEChMVVGhlIFVTRVJUUlVTVCBOZXR3b3JrMSEwHwYD
-# VQQLExhodHRwOi8vd3d3LnVzZXJ0cnVzdC5jb20xHTAbBgNVBAMTFFVUTi1VU0VS
-# Rmlyc3QtT2JqZWN0MB4XDTExMDQyNTAwMDAwMFoXDTEyMDQyNDIzNTk1OVowgZUx
-# CzAJBgNVBAYTAlVTMQ4wDAYDVQQRDAUwNjg1MDEUMBIGA1UECAwLQ29ubmVjdGlj
-# dXQxEDAOBgNVBAcMB05vcndhbGsxFjAUBgNVBAkMDTQ1IEdsb3ZlciBBdmUxGjAY
-# BgNVBAoMEVhlcm94IENvcnBvcmF0aW9uMRowGAYDVQQDDBFYZXJveCBDb3Jwb3Jh
-# dGlvbjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANaXR+8W+aH6ofiO
-# bZRdIRBuvemJ/8c2fDwbHVLBMieiG9Eqs5+XKZ3M17Sz8GBNzQ4bluk2esIycr9z
-# yR/ISBjVxz1RcxH79vuvM6husOAKc2YhnGqA6vmfWokmEfDrOH1qLKA4226tPXBE
-# eNTSDrYtXFZ6jYWv9kqGcRMBzV7NPvJwQoMDEl1dbNAXo99RaHGjAfVkCSNYMM11
-# jzZ2/DyAqVgKVnNviRQ+Wq8HPxP7Eqg/6b2DVw1Nokg3IDeyFRlo2he09YwVEV+r
-# GLvjUBmVRQPauJIr1EUgz85byWtYAUWOXNIFiWrqOKj/Clvi5Y9M05a1TwSi4o0F
-# yfa4keECAwEAAaOCAW8wggFrMB8GA1UdIwQYMBaAFNrtZHQUnBQ8q92Zqb1bKE2L
-# PMnYMB0GA1UdDgQWBBTKaDgQ0lToUHAI+jy/CDn0BluXFjAOBgNVHQ8BAf8EBAMC
-# B4AwDAYDVR0TAQH/BAIwADATBgNVHSUEDDAKBggrBgEFBQcDAzARBglghkgBhvhC
-# AQEEBAMCBBAwRgYDVR0gBD8wPTA7BgwrBgEEAbIxAQIBAwIwKzApBggrBgEFBQcC
-# ARYdaHR0cHM6Ly9zZWN1cmUuY29tb2RvLm5ldC9DUFMwQgYDVR0fBDswOTA3oDWg
-# M4YxaHR0cDovL2NybC51c2VydHJ1c3QuY29tL1VUTi1VU0VSRmlyc3QtT2JqZWN0
-# LmNybDA0BggrBgEFBQcBAQQoMCYwJAYIKwYBBQUHMAGGGGh0dHA6Ly9vY3NwLmNv
-# bW9kb2NhLmNvbTAhBgNVHREEGjAYgRZKb2VsLkJlbm5ldHRAeGVyb3guY29tMA0G
-# CSqGSIb3DQEBBQUAA4IBAQAzwUwy00sEOggAavqrNoNeEVr0o623DgG2/2EuTsA6
-# 2wI0Arb5D0s/icanshHgWwJZBEMZeHa17Ai/E3foCpj6rA3Y4vIQXHukluiSmjU6
-# bWTgF5VbNTpvhlOO6E7Ya/rBr4oj4dqTEErkS7acgBHKrjPOptCiU4BSDqtl0k5z
-# OIiawyRSITHYEcCcI0Yl7VIz8EDblOQI3b4JGYcmJ7D+peYrnI2zoQyXDigcIj4l
-# VlipnjnvYsF+JbPkQY8XbMO+Yc490Bh8BMXPtuLR1KMuIXPK7DKX7JPmJcY7kKF/
-# SPviyk0HE7Rldsses73UF8wT3lgj57FiUqX8FdTa7NllMYICTDCCAkgCAQEwgaow
-# gZUxCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJVVDEXMBUGA1UEBxMOU2FsdCBMYWtl
-# IENpdHkxHjAcBgNVBAoTFVRoZSBVU0VSVFJVU1QgTmV0d29yazEhMB8GA1UECxMY
-# aHR0cDovL3d3dy51c2VydHJ1c3QuY29tMR0wGwYDVQQDExRVVE4tVVNFUkZpcnN0
-# LU9iamVjdAIQHCAgf57pVOnJcjKrMO/dtjAJBgUrDgMCGgUAoHgwGAYKKwYBBAGC
-# NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAjBgkqhkiG9w0BCQQxFgQUgc2AkVqE
-# EN849j8G0GohLlwueJ4wDQYJKoZIhvcNAQEBBQAEggEALsDFBvLn1SEBk+fyLgHL
-# ibkAHDtrWMwfSLvOv3Sw61Oa+mviJp8H0pODa+3zfJxEoRa0JHYWUSMutNG0CIg9
-# YiEf1HLNoYam9s9rtR9YWdv9wx3CkU9Ci2yGfB4oEc1eCg/1prEHG7XWjqZDC6uG
-# vhFUNDHp9sWSF/ruVS3RBEm2VBJkvehpIsB4WsQ0aunDhsU4t2oFnFYC0leaasFy
-# rLNzzj9T4CZFydtTVh5xvXG0lWv5SMNhqegYjl+gfxGxrLBrNZiCTkC8vX2c5EHN
-# AhsqD53tH0wpC+icLoK+f/DPzi6xqJVOaQ1oruFk94RYNRAFGcgWInqKc2Gvsf6P
-# rA==
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU7i/4rcSOaFh6MGBAPJLn0Vpy
+# SVegghkkMIIDnzCCAoegAwIBAgIQeaKlhfnRFUIT2bg+9raN7TANBgkqhkiG9w0B
+# AQUFADBTMQswCQYDVQQGEwJVUzEXMBUGA1UEChMOVmVyaVNpZ24sIEluYy4xKzAp
+# BgNVBAMTIlZlcmlTaWduIFRpbWUgU3RhbXBpbmcgU2VydmljZXMgQ0EwHhcNMTIw
+# NTAxMDAwMDAwWhcNMTIxMjMxMjM1OTU5WjBiMQswCQYDVQQGEwJVUzEdMBsGA1UE
+# ChMUU3ltYW50ZWMgQ29ycG9yYXRpb24xNDAyBgNVBAMTK1N5bWFudGVjIFRpbWUg
+# U3RhbXBpbmcgU2VydmljZXMgU2lnbmVyIC0gRzMwgZ8wDQYJKoZIhvcNAQEBBQAD
+# gY0AMIGJAoGBAKlZZnTaPYp9etj89YBEe/5HahRVTlBHC+zT7c72OPdPabmx8LZ4
+# ggqMdhZn4gKttw2livYD/GbT/AgtzLVzWXuJ3DNuZlpeUje0YtGSWTUUi0WsWbJN
+# JKKYlGhCcp86aOJri54iLfSYTprGr7PkoKs8KL8j4ddypPIQU2eud69RAgMBAAGj
+# geMwgeAwDAYDVR0TAQH/BAIwADAzBgNVHR8ELDAqMCigJqAkhiJodHRwOi8vY3Js
+# LnZlcmlzaWduLmNvbS90c3MtY2EuY3JsMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMI
+# MDQGCCsGAQUFBwEBBCgwJjAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AudmVyaXNp
+# Z24uY29tMA4GA1UdDwEB/wQEAwIHgDAeBgNVHREEFzAVpBMwETEPMA0GA1UEAxMG
+# VFNBMS0zMB0GA1UdDgQWBBS0t/GJSSZg52Xqc67c0zjNv1eSbzANBgkqhkiG9w0B
+# AQUFAAOCAQEAHpiqJ7d4tQi1yXJtt9/ADpimNcSIydL2bfFLGvvV+S2ZAJ7R55uL
+# 4T+9OYAMZs0HvFyYVKaUuhDRTour9W9lzGcJooB8UugOA9ZresYFGOzIrEJ8Byyn
+# PQhm3ADt/ZQdc/JymJOxEdaP747qrPSWUQzQjd8xUk9er32nSnXmTs4rnykr589d
+# nwN+bid7I61iKWavkugszr2cf9zNFzxDwgk/dUXHnuTXYH+XxuSqx2n1/M10rCyw
+# SMFQTnBWHrU1046+se2svf4M7IV91buFZkQZXZ+T64K6Y57TfGH/yBvZI1h/MKNm
+# oTkmXpLDPMs3Mvr1o43c1bCj6SU2VdeB+jCCA8QwggMtoAMCAQICEEe/GZXfjVJG
+# Q/fbbUgNMaQwDQYJKoZIhvcNAQEFBQAwgYsxCzAJBgNVBAYTAlpBMRUwEwYDVQQI
+# EwxXZXN0ZXJuIENhcGUxFDASBgNVBAcTC0R1cmJhbnZpbGxlMQ8wDQYDVQQKEwZU
+# aGF3dGUxHTAbBgNVBAsTFFRoYXd0ZSBDZXJ0aWZpY2F0aW9uMR8wHQYDVQQDExZU
+# aGF3dGUgVGltZXN0YW1waW5nIENBMB4XDTAzMTIwNDAwMDAwMFoXDTEzMTIwMzIz
+# NTk1OVowUzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDlZlcmlTaWduLCBJbmMuMSsw
+# KQYDVQQDEyJWZXJpU2lnbiBUaW1lIFN0YW1waW5nIFNlcnZpY2VzIENBMIIBIjAN
+# BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqcqypMzNIK8KfYmsh3XwtE7x38EP
+# v2dhvaNkHNq7+cozq4QwiVh+jNtr3TaeD7/R7Hjyd6Z+bzy/k68Numj0bJTKvVIt
+# q0g99bbVXV8bAp/6L2sepPejmqYayALhf0xS4w5g7EAcfrkN3j/HtN+HvV96ajEu
+# A5mBE6hHIM4xcw1XLc14NDOVEpkSud5oL6rm48KKjCrDiyGHZr2DWFdvdb88qiaH
+# XcoQFTyfhOpUwQpuxP7FSt25BxGXInzbPifRHnjsnzHJ8eYiGdvEs0dDmhpfoB6Q
+# 5F717nzxfatiAY/1TQve0CJWqJXNroh2ru66DfPkTdmg+2igrhQ7s4fBuwIDAQAB
+# o4HbMIHYMDQGCCsGAQUFBwEBBCgwJjAkBggrBgEFBQcwAYYYaHR0cDovL29jc3Au
+# dmVyaXNpZ24uY29tMBIGA1UdEwEB/wQIMAYBAf8CAQAwQQYDVR0fBDowODA2oDSg
+# MoYwaHR0cDovL2NybC52ZXJpc2lnbi5jb20vVGhhd3RlVGltZXN0YW1waW5nQ0Eu
+# Y3JsMBMGA1UdJQQMMAoGCCsGAQUFBwMIMA4GA1UdDwEB/wQEAwIBBjAkBgNVHREE
+# HTAbpBkwFzEVMBMGA1UEAxMMVFNBMjA0OC0xLTUzMA0GCSqGSIb3DQEBBQUAA4GB
+# AEpr+epYwkQcMYl5mSuWv4KsAdYcTM2wilhu3wgpo17IypMT5wRSDe9HJy8AOLDk
+# yZNOmtQiYhX3PzchT3AxgPGLOIez6OiXAP7PVZZOJNKpJ056rrdhQfMqzufJ2V7d
+# uyuFPrWdtdnhV/++tMV+9c8MnvCX/ivTO1IbGzgn9z9KMIIETzCCA7igAwIBAgIE
+# BydYPTANBgkqhkiG9w0BAQUFADB1MQswCQYDVQQGEwJVUzEYMBYGA1UEChMPR1RF
+# IENvcnBvcmF0aW9uMScwJQYDVQQLEx5HVEUgQ3liZXJUcnVzdCBTb2x1dGlvbnMs
+# IEluYy4xIzAhBgNVBAMTGkdURSBDeWJlclRydXN0IEdsb2JhbCBSb290MB4XDTEw
+# MDExMzE5MjAzMloXDTE1MDkzMDE4MTk0N1owbDELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTErMCkG
+# A1UEAxMiRGlnaUNlcnQgSGlnaCBBc3N1cmFuY2UgRVYgUm9vdCBDQTCCASIwDQYJ
+# KoZIhvcNAQEBBQADggEPADCCAQoCggEBAMbM5XPm+9S75S0tMqbf5YE/yc0lSbZx
+# KsPVlDRnogocsF9ppkCxxLeyj9CYpKlBWTrT3JTWPNt0OKRKzE0lgvdKpVMSOO7z
+# SW1xkX5jtqumX8OkhPhPYlG++MXs2ziS4wblCJEMxChBVfvLWokVfnHoNb9Ncgk9
+# vjo4UFt3MRuNs8ckRZqnrG0AFFoEt7oT61EKmEFBIk5lYYeBQVCmeVyJ3hlKV9Uu
+# 5l0cUyx+mM0aBhakaHPQNAQTXKFx01p8VdteZOE3hzBWBOURtCmAEvF5OYiiAhF8
+# J2a3iLd48soKqDirCmTCv2ZdlYTBoSUeh10aUAsgEsxBu24LUTi4S8sCAwEAAaOC
+# AW8wggFrMBIGA1UdEwEB/wQIMAYBAf8CAQEwUwYDVR0gBEwwSjBIBgkrBgEEAbE+
+# AQAwOzA5BggrBgEFBQcCARYtaHR0cDovL2N5YmVydHJ1c3Qub21uaXJvb3QuY29t
+# L3JlcG9zaXRvcnkuY2ZtMA4GA1UdDwEB/wQEAwIBBjCBiQYDVR0jBIGBMH+heaR3
+# MHUxCzAJBgNVBAYTAlVTMRgwFgYDVQQKEw9HVEUgQ29ycG9yYXRpb24xJzAlBgNV
+# BAsTHkdURSBDeWJlclRydXN0IFNvbHV0aW9ucywgSW5jLjEjMCEGA1UEAxMaR1RF
+# IEN5YmVyVHJ1c3QgR2xvYmFsIFJvb3SCAgGlMEUGA1UdHwQ+MDwwOqA4oDaGNGh0
+# dHA6Ly93d3cucHVibGljLXRydXN0LmNvbS9jZ2ktYmluL0NSTC8yMDE4L2NkcC5j
+# cmwwHQYDVR0OBBYEFLE+w2kD+L9HAdSYJhoIAu9jZCvDMA0GCSqGSIb3DQEBBQUA
+# A4GBAC52hdk3lm2vifMGeIIxxEYHH2XJjrPJVHjm0ULfdS4eVer3+psEwHV70Xk8
+# Bex5xFLdpgPXp1CZPwVZ2sZV9IacDWejSQSVMh3Hh+yFr2Ru1cVfCadAfRa6SQ2i
+# /fbfVTBs13jGuc9YKWQWTKMggUexRJKEFhtvSrwhxgo97TPKMIIGnzCCBYegAwIB
+# AgIQDmkGmMIUyHq1tgS5FjzRkDANBgkqhkiG9w0BAQUFADBzMQswCQYDVQQGEwJV
+# UzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNlcnQu
+# Y29tMTIwMAYDVQQDEylEaWdpQ2VydCBIaWdoIEFzc3VyYW5jZSBDb2RlIFNpZ25p
+# bmcgQ0EtMTAeFw0xMjAzMjAwMDAwMDBaFw0xMzAzMjIxMjAwMDBaMG0xCzAJBgNV
+# BAYTAlVTMREwDwYDVQQIEwhOZXcgWW9yazEXMBUGA1UEBxMOV2VzdCBIZW5yaWV0
+# dGExGDAWBgNVBAoTD0pvZWwgSC4gQmVubmV0dDEYMBYGA1UEAxMPSm9lbCBILiBC
+# ZW5uZXR0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2ogGAG89d1jM
+# fRJv2d3U1lCsW8ok7GkjnLYDn0zC1ALq11rWN5NVwVbn133i+KV0O8kM5vd2M7xE
+# 8CnVAgybjkrvRD2IqMtp4SrwQuiGiVGsNVWO3vSLHcWsS/I7N0UIpS5PhTuFB4Pc
+# Oy/MHR4F2g6JLMrAtkpYWxauAFZfFwuEfm6vqWobHTDt5wG+zqOTxMSi1UvL5fEM
+# DoejGqqriIx5mKDzrvUb/ALNKZ1rGPWlT7O0/UHrV5VuOfgij4XVKBAdcg9JLxky
+# AEIJ+VvVQ2Jn3lVONCCHbfu5IVhddMru81U/v5Wrj80Zrwh2TH25qlclUKr6eXRL
+# tP+xFm23CwIDAQABo4IDMzCCAy8wHwYDVR0jBBgwFoAUl0gD6xUIa7myWCPMlC7x
+# xmXSZI4wHQYDVR0OBBYEFJicRKq/XsBWRuKzU6eTUCBCCU65MA4GA1UdDwEB/wQE
+# AwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzBpBgNVHR8EYjBgMC6gLKAqhihodHRw
+# Oi8vY3JsMy5kaWdpY2VydC5jb20vaGEtY3MtMjAxMWEuY3JsMC6gLKAqhihodHRw
+# Oi8vY3JsNC5kaWdpY2VydC5jb20vaGEtY3MtMjAxMWEuY3JsMIIBxAYDVR0gBIIB
+# uzCCAbcwggGzBglghkgBhv1sAwEwggGkMDoGCCsGAQUFBwIBFi5odHRwOi8vd3d3
+# LmRpZ2ljZXJ0LmNvbS9zc2wtY3BzLXJlcG9zaXRvcnkuaHRtMIIBZAYIKwYBBQUH
+# AgIwggFWHoIBUgBBAG4AeQAgAHUAcwBlACAAbwBmACAAdABoAGkAcwAgAEMAZQBy
+# AHQAaQBmAGkAYwBhAHQAZQAgAGMAbwBuAHMAdABpAHQAdQB0AGUAcwAgAGEAYwBj
+# AGUAcAB0AGEAbgBjAGUAIABvAGYAIAB0AGgAZQAgAEQAaQBnAGkAQwBlAHIAdAAg
+# AEMAUAAvAEMAUABTACAAYQBuAGQAIAB0AGgAZQAgAFIAZQBsAHkAaQBuAGcAIABQ
+# AGEAcgB0AHkAIABBAGcAcgBlAGUAbQBlAG4AdAAgAHcAaABpAGMAaAAgAGwAaQBt
+# AGkAdAAgAGwAaQBhAGIAaQBsAGkAdAB5ACAAYQBuAGQAIABhAHIAZQAgAGkAbgBj
+# AG8AcgBwAG8AcgBhAHQAZQBkACAAaABlAHIAZQBpAG4AIABiAHkAIAByAGUAZgBl
+# AHIAZQBuAGMAZQAuMIGGBggrBgEFBQcBAQR6MHgwJAYIKwYBBQUHMAGGGGh0dHA6
+# Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBQBggrBgEFBQcwAoZEaHR0cDovL2NhY2VydHMu
+# ZGlnaWNlcnQuY29tL0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUNvZGVTaWduaW5nQ0Et
+# MS5jcnQwDAYDVR0TAQH/BAIwADANBgkqhkiG9w0BAQUFAAOCAQEAHIfeYpO0Jtdi
+# /TpcI6eWQIYU2ALO847Q91jLE6WiU6u8wN6tkHqgeOls070SDUK+C1rVoXKKZ0Je
+# c2k1dYukKPkyf3qURPyh/aC3hJ0Wwbje7fK79Lt9ZHwJORpesJrwa8T63l3qLLLl
+# PaIYo/bqiMpNZRfOclukKg2hO67yMaQl8DEL/D5UP1XZShF2zbauH627zEC5KXGZ
+# Y2yUbmWG2N0oHxr+q4Gyfd0MPtU5avWOILB0ZsN+br+SCVVK6nKzauXMk4HXmKHa
+# X7cysqpmQiFb7/J7tPQ037KQKHCY/Z+fl0arRCiHih/Q/5owv51WSKPiaUrkBvdJ
+# 0mKVK+McHzCCBr8wggWnoAMCAQICEAgcV+5dcOuboLFSDHKcGwkwDQYJKoZIhvcN
+# AQEFBQAwbDELMAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcG
+# A1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTErMCkGA1UEAxMiRGlnaUNlcnQgSGlnaCBB
+# c3N1cmFuY2UgRVYgUm9vdCBDQTAeFw0xMTAyMTAxMjAwMDBaFw0yNjAyMTAxMjAw
+# MDBaMHMxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNV
+# BAsTEHd3dy5kaWdpY2VydC5jb20xMjAwBgNVBAMTKURpZ2lDZXJ0IEhpZ2ggQXNz
+# dXJhbmNlIENvZGUgU2lnbmluZyBDQS0xMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A
+# MIIBCgKCAQEAxfkj5pQnxIAUpIAyX0CjjW9wwOU2cXE6daSqGpKUiV6sI3HLTmd9
+# QT+q40u3e76dwag4j2kvOiTpd1kSx2YEQ8INJoKJQBnyLOrnTOd8BRq4/4gJTyY3
+# 7zqk+iJsiMlKG2HyrhBeb7zReZtZGGDl7im1AyqkzvGDGU9pBXMoCfsiEJMioJAZ
+# Gkwx8tMr2IRDrzxj/5jbINIJK1TB6v1qg+cQoxJx9dbX4RJ61eBWWs7qAVtoZVvB
+# P1hSM6k1YU4iy4HKNqMSywbWzxtNGH65krkSz0Am2Jo2hbMVqkeThGsHu7zVs94l
+# ABGJAGjBKTzqPi3uUKvXHDAGeDylECNnkQIDAQABo4IDVDCCA1AwDgYDVR0PAQH/
+# BAQDAgEGMBMGA1UdJQQMMAoGCCsGAQUFBwMDMIIBwwYDVR0gBIIBujCCAbYwggGy
+# BghghkgBhv1sAzCCAaQwOgYIKwYBBQUHAgEWLmh0dHA6Ly93d3cuZGlnaWNlcnQu
+# Y29tL3NzbC1jcHMtcmVwb3NpdG9yeS5odG0wggFkBggrBgEFBQcCAjCCAVYeggFS
+# AEEAbgB5ACAAdQBzAGUAIABvAGYAIAB0AGgAaQBzACAAQwBlAHIAdABpAGYAaQBj
+# AGEAdABlACAAYwBvAG4AcwB0AGkAdAB1AHQAZQBzACAAYQBjAGMAZQBwAHQAYQBu
+# AGMAZQAgAG8AZgAgAHQAaABlACAARABpAGcAaQBDAGUAcgB0ACAARQBWACAAQwBQ
+# AFMAIABhAG4AZAAgAHQAaABlACAAUgBlAGwAeQBpAG4AZwAgAFAAYQByAHQAeQAg
+# AEEAZwByAGUAZQBtAGUAbgB0ACAAdwBoAGkAYwBoACAAbABpAG0AaQB0ACAAbABp
+# AGEAYgBpAGwAaQB0AHkAIABhAG4AZAAgAGEAcgBlACAAaQBuAGMAbwByAHAAbwBy
+# AGEAdABlAGQAIABoAGUAcgBlAGkAbgAgAGIAeQAgAHIAZQBmAGUAcgBlAG4AYwBl
+# AC4wDwYDVR0TAQH/BAUwAwEB/zB/BggrBgEFBQcBAQRzMHEwJAYIKwYBBQUHMAGG
+# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBJBggrBgEFBQcwAoY9aHR0cDovL2Nh
+# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUVWUm9vdENB
+# LmNydDCBjwYDVR0fBIGHMIGEMECgPqA8hjpodHRwOi8vY3JsMy5kaWdpY2VydC5j
+# b20vRGlnaUNlcnRIaWdoQXNzdXJhbmNlRVZSb290Q0EuY3JsMECgPqA8hjpodHRw
+# Oi8vY3JsNC5kaWdpY2VydC5jb20vRGlnaUNlcnRIaWdoQXNzdXJhbmNlRVZSb290
+# Q0EuY3JsMB0GA1UdDgQWBBSXSAPrFQhrubJYI8yULvHGZdJkjjAfBgNVHSMEGDAW
+# gBSxPsNpA/i/RwHUmCYaCALvY2QrwzANBgkqhkiG9w0BAQUFAAOCAQEAggXpha+n
+# TL+vzj2y6mCxaN5nwtLLJuDDL5u1aw5TkIX2m+A1Av/6aYOqtHQyFDwuEEwomwqt
+# CAn584QRk4/LYEBW6XcvabKDmVWrRySWy39LsBC0l7/EpZkG/o7sFFAeXleXy0e5
+# NNn8OqL/UCnCCmIE7t6WOm+gwoUPb/wI5DJ704SuaWAJRiac6PD//4bZyAk6ZsOn
+# No8YT+ixlpIuTr4LpzOQrrxuT/F+jbRGDmT5WQYiIWQAS+J6CAPnvImQnkJPAcC2
+# Fn916kaypVQvjJPNETY0aihXzJQ/6XzIGAMDBH5D2vmXoVlH2hKq4G04AF01K8Ui
+# hssGyrx6TT0mRjGCA6wwggOoAgEBMIGHMHMxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
+# EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xMjAwBgNV
+# BAMTKURpZ2lDZXJ0IEhpZ2ggQXNzdXJhbmNlIENvZGUgU2lnbmluZyBDQS0xAhAO
+# aQaYwhTIerW2BLkWPNGQMAkGBSsOAwIaBQCgeDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMCMGCSqGSIb3DQEJBDEWBBQi/t811+xfM0LNj5x8Yh4W
+# 4VVTRTANBgkqhkiG9w0BAQEFAASCAQA216Utho6PZL213Vbd+P5nXS9mRBz581vL
+# EkhYMvfduQeikLHIIP2CqEGcnwuwNWTzHlN0UkdsDtP9tLdXQt+czvhikd6rzrKH
+# VcrnfE4IPQt6QT+06PAb4Dwt2RVV9dpstHhKZIWn+GoFuLHuJQzPMgdulYeKMFO2
+# ZLrEkmF5+DWzMpBC80WLlpwDJOoUmiuK4oQfzMzqFLBxpw5RAQcA+AA3ohWtQPuF
+# c7ywquc1c8dCxG5cYaRtFo+LLf6jx4FO24vreKWLbEOx0cTb8PNWvrT34lgnTgUI
+# pWLJkSRGzywnq3w+keexYi4GC16PfJKnVV8qsRri/wG/AdBQ+ovnoYIBfzCCAXsG
+# CSqGSIb3DQEJBjGCAWwwggFoAgEBMGcwUzELMAkGA1UEBhMCVVMxFzAVBgNVBAoT
+# DlZlcmlTaWduLCBJbmMuMSswKQYDVQQDEyJWZXJpU2lnbiBUaW1lIFN0YW1waW5n
+# IFNlcnZpY2VzIENBAhB5oqWF+dEVQhPZuD72to3tMAkGBSsOAwIaBQCgXTAYBgkq
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xMjA2MjEwNTAw
+# NTlaMCMGCSqGSIb3DQEJBDEWBBSODCUreYZBSE+ys+civTtfLRjcLjANBgkqhkiG
+# 9w0BAQEFAASBgFrvbqX/d1ys5yFuOrI2PeQOPEAkE5DdaU7KmGtYUR7B8aLQGXfw
+# EP3AoFVdswv8zHnZuMMiV3xhtzAT0w0xQKj+CQQ7iQLgyWpSU0zonMT/bRkDglKF
+# JfC6tpo0dJnqqLXfc3p9JJiSJyI5HneFwtbVSyhmWfYLBJ6kB6Ofypn+
 # SIG # End signature block
