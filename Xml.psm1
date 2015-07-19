@@ -14,8 +14,9 @@
 # Select-Xml 2.1 Matched the built-in Select-Xml parameter sets, it's now a drop-in replacement 
 #                BUT only if you were using the original with: Select-Xml ... | Select-Object -Expand Node
 # Select-Xml 2.2 Fixes a bug in the -Content parameterset where -RemoveNamespace was *presumed*
-# Version    3.0 Added New-Xml and associated generation functions for my XML DSL
-# Version    3.1 Fixed a really ugly bug in New-Xml in 3.0 which I should not have released
+# Version    3.0 Added New-XDocument and associated generation functions for my XML DSL
+# Version    3.1 Fixed a really ugly bug in New-XDocument in 3.0 which I should not have released
+# Version    4.0 Never content to leave well enough alone, I've completely reworked New-XDocument
 
 $xlr8r = [type]::gettype("System.Management.Automation.TypeAccelerators")
 $xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
@@ -25,6 +26,14 @@ $xlinq.GetTypes() | ? { $_.IsPublic -and !$_.IsSerializable -and $_.Name -ne "Ex
 if(!$xlr8r::Get["Stack"]) {
    $xlr8r::Add( "Stack", "System.Collections.Generic.Stack``1, System, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" )
 }
+if(!$xlr8r::Get["Dictionary"]) {
+   $xlr8r::Add( "Dictionary", "System.Collections.Generic.Dictionary``2, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" )
+}
+if(!$xlr8r::Get["PSParser"]) {
+   $xlr8r::Add( "PSParser", "System.Management.Automation.PSParser, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35" )
+}
+
+
 
 function Format-XML {
 #.Synopsis
@@ -358,21 +367,22 @@ function New-XDocument {
 #
 #.Example
 # [XNamespace]$dc = "http`://purl.org/dc/elements/1.1"
-# $xml = New-XDocument rss -dc $dc -version "2.0" {
-#    xe channel {
-#       xe title {"Test RSS Feed"}
-#       xe link {"http`://HuddledMasses.org"}
-#       xe description {"An RSS Feed generated simply to demonstrate my XML DSL"}
-#       xe ($dc + "language") {"en"}
-#       xe ($dc + "creator") {"Jaykul@HuddledMasses.org"}
-#       xe ($dc + "rights") {"Copyright 2009, CC-BY"}
-#       xe ($dc + "date") {(Get-Date -f u) -replace " ","T"}
-#       xe item {
-#          xe title {"The First Item"}
-#          xe link {"http`://huddledmasses.org/new-site-new-layout-lost-posts/"}
-#          xe guid -isPermaLink true {"http`://huddledmasses.org/new-site-new-layout-lost-posts/"}
-#          xe description {"Ema Lazarus' Poem"}
-#          xe pubDate  {(Get-Date 10/31/2003 -f u) -replace " ","T"}
+# [string]$xml = New-XDocument rss -dc $dc -version "2.0" {
+#    channel {
+#       title {"Test RSS Feed"}
+#       link {"http`://HuddledMasses.org"}
+#       description {"An RSS Feed generated simply to demonstrate my XML DSL"}
+#       dc:language {"en"}
+#       dc:creator {"Jaykul@HuddledMasses.org"}
+#       dc:rights {"Copyright 2009, CC-BY"}
+#       dc:date {(Get-Date -f u) -replace " ","T"}
+# 
+#       item {
+#          title {"The First Item"}
+#          link {"http`://huddledmasses.org/new-site-new-layout-lost-posts/"}
+#          guid -isPermaLink true {"http`://huddledmasses.org/new-site-new-layout-lost-posts/"}
+#          description {"Ema Lazarus' Poem"}
+#          pubDate {(Get-Date 10/31/2003 -f u) -replace " ","T"}
 #       }
 #    }
 # }
@@ -412,30 +422,30 @@ function New-XDocument {
 ##            ## e.g.: -atom $atom
 ## The `: in the http`: is still only there for PoshCode, you can just use http: ...
 #
-#   [XNamespace]$atom="http`://www.w3.org/2005/Atom"
-#   [XNamespace]$dc = "http`://purl.org/dc/elements/1.1"
-#  
-#   New-Xml ($atom + "feed") -Encoding "UTF-16" -$([XNamespace]::Xml +'lang') "en-US" -dc $dc {
-#      xe title {"Test First Entry"}
-#      xe link {"http`://HuddledMasses.org"}
-#      xe updated {(Get-Date -f u) -replace " ","T"}
-#      xe author {
-#         xe name {"Joel Bennett"}
-#         xe uri {"http`://HuddledMasses.org"}
-#      }
-#      xe id {"http`://huddledmasses.org/" }
-#
-#      xe entry {
-#         xe title {"Test First Entry"}
-#         xe link {"http`://HuddledMasses.org/new-site-new-layout-lost-posts/" }
-#         xe id {"http`://huddledmasses.org/new-site-new-layout-lost-posts/" }
-#         xe updated {(Get-Date 10/31/2003 -f u) -replace " ","T"}
-#         xe summary {"Ema Lazarus' Poem"}
-#         xe link -rel license -href "http://creativecommons.org/licenses/by/3.0/" -title "CC By-Attribution"
-#         xe ($dc + "rights") {"Copyright 2009, Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)"}
-#         xe category -scheme "http://huddledmasses.org/tag/" -term "huddled-masses"
-#      }
-#   } | % { $_.Declaration.ToString(); $_.ToString() }
+# [XNamespace]$atom="http`://www.w3.org/2005/Atom"
+# [XNamespace]$dc = "http`://purl.org/dc/elements/1.1"
+# 
+# New-XDocument ($atom + "feed") -Encoding "UTF-16" -$([XNamespace]::Xml +'lang') "en-US" -dc $dc {
+# 	title {"Test First Entry"}
+# 	link {"http`://HuddledMasses.org"}
+# 	updated {(Get-Date -f u) -replace " ","T"}
+# 	author {
+# 		name {"Joel Bennett"}
+# 		uri {"http`://HuddledMasses.org"}
+# 	}
+# 	id {"http`://huddledmasses.org/" }
+# 
+# 	entry {
+#       title {"Test First Entry"}
+# 		link {"http`://HuddledMasses.org/new-site-new-layout-lost-posts/" }
+# 		id {"http`://huddledmasses.org/new-site-new-layout-lost-posts/" }
+# 		updated {(Get-Date 10/31/2003 -f u) -replace " ","T"}
+# 		summary {"Ema Lazarus' Poem"}
+# 		link -rel license -href "http://creativecommons.org/licenses/by/3.0/" -title "CC By-Attribution"
+# 		dc:rights { "Copyright 2009, Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)" }
+#       category -scheme "http://huddledmasses.org/tag/" -term "huddled-masses"
+# 	}
+# } | % { $_.Declaration.ToString(); $_.ToString() }
 #
 #
 #  OUTPUT: (NOTE: I added the spaces again to the http: to paste it on PoshCode)
@@ -481,6 +491,7 @@ Param(
    [PSObject[]]$args
 )
 BEGIN {
+   $script:NameSpaceHash = New-Object 'Dictionary[String,XNamespace]'
    $script:NameSpaceStack = New-Object 'Stack[XNamespace]'
    if(![string]::IsNullOrEmpty( $root.NamespaceName )) {
 		$script:NameSpaceStack.Push( $root.Namespace )
@@ -498,21 +509,24 @@ PROCESS {
          while($args) {
             $attrib, $value, $args = $args
             if($attrib -is [ScriptBlock]) {
+               Write-Verbose "Preparsed DSL: $attrib"
+               $attrib = DSL $attrib
+               Write-Verbose "Reparsed DSL: $attrib"
                &$attrib
             } elseif ( $value -is [ScriptBlock] -and "-Content".StartsWith($attrib)) {
+               $value = DSL $value
                &$value
             } elseif ( $value -is [XNamespace]) {
-               New-XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-")) $value
+               New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-")), $value
+               $script:NameSpaceHash.Add($attrib.TrimStart("-"), $value)
             } else {
-               New-XAttribute $attrib.TrimStart("-") $value
+               New-Object XAttribute $attrib.TrimStart("-"), $value
             }
          }
       ))
 }
 END {
-   #if(![string]::IsNullOrEmpty( $root.NamespaceName )) {
-      $null = $script:NameSpaceStack.Pop()
-   #}
+   $null = $script:NameSpaceStack.Pop()
 }
 }
 
@@ -568,25 +582,47 @@ PROCESS {
      $tag
      while($args) {
         $attrib, $value, $args = $args
-        if($attrib -is [ScriptBlock]) {
+        if($attrib -is [ScriptBlock]) { # then it's content
            &$attrib
-        } elseif ( $value -is [ScriptBlock] -and "-Content".StartsWith($attrib)) {
+        } elseif ( $value -is [ScriptBlock] -and "-Content".StartsWith($attrib)) { # then it's content
            &$value
         } elseif ( $value -is [XNamespace]) {
            New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-")), $value
+           $script:NameSpaceHash.Add($attrib.TrimStart("-"), $value)
         } else {
            New-Object XAttribute $attrib.TrimStart("-"), $value
-        }
+        }        
      }
    )
 }
 END {
-   #if(![string]::IsNullOrEmpty( $tag.NamespaceName )) {
-      $null = $script:NameSpaceStack.Pop()
-   #}
+   $null = $script:NameSpaceStack.Pop()
 }
 }
 Set-Alias xe New-XElement
 Set-Alias New-XmlElement New-XElement
+
+
+function DSL {
+Param([ScriptBlock]$script)
+   $parserrors = $null
+   $global:tokens = [PSParser]::Tokenize( $script, [ref]$parserrors )
+   $duds = $global:tokens | Where-Object { $_.Type -eq "Command" -and ($(Get-Command $_.Content -EA 0) -eq $Null) }
+   [Array]::Reverse( $duds )
+   
+   [string[]]$ScriptText = "$script" -split "`n"
+
+   ForEach($token in $duds ) {
+      # replace : notation with namespace notation
+      if( $token.Content.Contains(":") ) {
+         $key, $localname = $token.Content -split ":"
+         $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[$key] + $localname) + "'" )
+      }
+      # insert 'xe' before everything (unless it's a valid command)
+      $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Insert( $token.StartColumn -1, "xe " )
+   }
+   Write-Output ([ScriptBlock]::Create( ($ScriptText -join "`n") ))
+}
+   
 
 Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Convert-Xml, Select-Xml, Format-Xml
