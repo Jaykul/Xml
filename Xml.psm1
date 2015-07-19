@@ -35,6 +35,7 @@
 #       - Removed Path and Content parameters from the other functions (it greatly simplifies thost functions, and makes the whole thing more maintainable)
 #       - Updated Update-Xml to support adding nodes "before" and "after" other nodes, and to support "remove"ing nodes
 # Version    6.1 Update for PowerShell 3.0
+# Version    6.2 Minor tweak in exception handling for CliXml
 
 function Add-Accelerator {
 <#
@@ -652,7 +653,7 @@ function ConvertFrom-CliXml {
          try {
             $method.invoke($deserializer, "")
          } catch {
-            write-warning "Could not deserialize ${string}: $_"
+            write-warning "Could not deserialize $xmlString"
          }
       }
       $xr.Close()
@@ -679,7 +680,7 @@ function ConvertTo-CliXml {
       try {
          [void]$method.invoke($serializer, $InputObject)
       } catch {
-         write-warning "Could not serialize $($InputObject.gettype()): $_"
+         write-warning "Could not serialize $($InputObject.gettype()): $InputObject"
       }
    }
    end {    
@@ -960,8 +961,8 @@ Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XEleme
 # SIG # Begin signature block
 # MIIdZgYJKoZIhvcNAQcCoIIdVzCCHVMCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU7i/4rcSOaFh6MGBAPJLn0Vpy
-# SVegghkkMIIDnzCCAoegAwIBAgIQeaKlhfnRFUIT2bg+9raN7TANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUtjycTLbprXSw4krXhTfs6eQf
+# geWgghkkMIIDnzCCAoegAwIBAgIQeaKlhfnRFUIT2bg+9raN7TANBgkqhkiG9w0B
 # AQUFADBTMQswCQYDVQQGEwJVUzEXMBUGA1UEChMOVmVyaVNpZ24sIEluYy4xKzAp
 # BgNVBAMTIlZlcmlTaWduIFRpbWUgU3RhbXBpbmcgU2VydmljZXMgQ0EwHhcNMTIw
 # NTAxMDAwMDAwWhcNMTIxMjMxMjM1OTU5WjBiMQswCQYDVQQGEwJVUzEdMBsGA1UE
@@ -1100,19 +1101,19 @@ Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XEleme
 # BAMTKURpZ2lDZXJ0IEhpZ2ggQXNzdXJhbmNlIENvZGUgU2lnbmluZyBDQS0xAhAO
 # aQaYwhTIerW2BLkWPNGQMAkGBSsOAwIaBQCgeDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMCMGCSqGSIb3DQEJBDEWBBQi/t811+xfM0LNj5x8Yh4W
-# 4VVTRTANBgkqhkiG9w0BAQEFAASCAQA216Utho6PZL213Vbd+P5nXS9mRBz581vL
-# EkhYMvfduQeikLHIIP2CqEGcnwuwNWTzHlN0UkdsDtP9tLdXQt+czvhikd6rzrKH
-# VcrnfE4IPQt6QT+06PAb4Dwt2RVV9dpstHhKZIWn+GoFuLHuJQzPMgdulYeKMFO2
-# ZLrEkmF5+DWzMpBC80WLlpwDJOoUmiuK4oQfzMzqFLBxpw5RAQcA+AA3ohWtQPuF
-# c7ywquc1c8dCxG5cYaRtFo+LLf6jx4FO24vreKWLbEOx0cTb8PNWvrT34lgnTgUI
-# pWLJkSRGzywnq3w+keexYi4GC16PfJKnVV8qsRri/wG/AdBQ+ovnoYIBfzCCAXsG
+# DjAMBgorBgEEAYI3AgEVMCMGCSqGSIb3DQEJBDEWBBTBjSgoFuawl9Ao5Tv2xqPO
+# 3Kl4sDANBgkqhkiG9w0BAQEFAASCAQA5AQUWDBjbcGyAveEi6lzwSWZf7xIx87zm
+# U80EVwu1VDqIcgN4jyUMf7ni8qrZsSZoc4e4xj3tSRmMjZPd7M5C+DL8ZBitU4VV
+# X6VT86ANs+njcZ+2eVZtZW9jYYG42TJN507NcDL1KilaSRyrUUJfBcSFaa+UN2pQ
+# n0/GNPYoZxZwdho0IVdIJifBO61IqYVCWNL3CNfaTvBVVbEXA70LG3yKUoQdEvpV
+# /3Eyd3fJzdmHZGpKwq8Wf/tlMN7dVM59GG0SGE81FASCJNno18MKKY7vWLGoo3Fc
+# drZCFDm8Wq/Q/M10mKEFWzlztThqxeUx/3oA2TKLM2eUtA4PVw+QoYIBfzCCAXsG
 # CSqGSIb3DQEJBjGCAWwwggFoAgEBMGcwUzELMAkGA1UEBhMCVVMxFzAVBgNVBAoT
 # DlZlcmlTaWduLCBJbmMuMSswKQYDVQQDEyJWZXJpU2lnbiBUaW1lIFN0YW1waW5n
 # IFNlcnZpY2VzIENBAhB5oqWF+dEVQhPZuD72to3tMAkGBSsOAwIaBQCgXTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xMjA2MjEwNTAw
-# NTlaMCMGCSqGSIb3DQEJBDEWBBSODCUreYZBSE+ys+civTtfLRjcLjANBgkqhkiG
-# 9w0BAQEFAASBgFrvbqX/d1ys5yFuOrI2PeQOPEAkE5DdaU7KmGtYUR7B8aLQGXfw
-# EP3AoFVdswv8zHnZuMMiV3xhtzAT0w0xQKj+CQQ7iQLgyWpSU0zonMT/bRkDglKF
-# JfC6tpo0dJnqqLXfc3p9JJiSJyI5HneFwtbVSyhmWfYLBJ6kB6Ofypn+
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xMjA2MjEwNTA1
+# MTJaMCMGCSqGSIb3DQEJBDEWBBS/y8ZQJu39fwfbrPlsNYHdOEbIWjANBgkqhkiG
+# 9w0BAQEFAASBgBVlS+jMlhYAmeerqAJAXyX18fe2m/quZkq09V6c2OOSzWmcHMwT
+# +sgJDVKPmImnn7YT0tL8SyIflxmVVapR3pAnzFq5XXVmYqxu3+g1rSRxUQyCmEwU
+# p84MHiU+17yfE+KbvT0/Y+jv71MnbkUOeqAKH2+fGdiR6pSO+zKoiH/q
 # SIG # End signature block
