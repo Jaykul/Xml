@@ -19,8 +19,8 @@
 # Version    4.0 Never content to leave well enough alone, I've completely reworked New-XDocument
 # Version    4.1 Tweaked namespaces again so they don't cascade down when they shouldn't. Got rid of the unnecessary stack.
 # Version    4.2 Tightened xml: only cmdlet, function, and external scripts, with "-" in their names are exempted from being converted into xml tags.
-#                Fixed some alias error messages caused when PSCX is already loaded (we were failing to overwrite aliases for cvxml and fxml)
-#                Renamed the internal DSL function
+#                Fixed some alias error messages caused when PSCX is already loaded (we overwrite their aliases for cvxml and fxml)
+# Version    4.3 Added a Path parameter set to Format-XML so you can specify xml files for prety printing
 
 $xlr8r = [type]::gettype("System.Management.Automation.TypeAccelerators")
 $xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
@@ -39,30 +39,49 @@ if(!$xlr8r::Get["PSParser"]) {
 
 
 
-function Format-XML {
+filter Format-XML {
 #.Synopsis
 #   Pretty-print formatted XML source
 #.Description
 #   Runs an XmlDocument through an auto-indenting XmlWriter
 #.Parameter Xml
 #   The Xml Document
+#.Parameter Path
+#   The path to an xml document (on disc or any other content provider).
 #.Parameter Indent
 #   The indent level (defaults to 2 spaces)
+#.Example
+#   [xml]$xml = get-content Data.xml
+#   C:\PS>Format-Xml $xml
+#.Example
+#   get-content Data.xml | Format-Xml
+#.Example
+#   Format-Xml C:\PS\Data.xml
+#.Example
+#   ls *.xml | Format-Xml
+#
 Param(
-   [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$true)]
-   [xml]$xml
+   [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true, ParameterSetName="Document")]
+   [xml]$Xml
+,
+   [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true, ParameterSetName="File")]
+   [Alias("PsPath")]
+   [string]$Path
 ,
    [Parameter(Mandatory=$false)]
-   $indent=2
+   $Indent=2
 )
-    $StringWriter = New-Object System.IO.StringWriter
-    $XmlWriter = New-Object System.Xml.XmlTextWriter $StringWriter
-    $xmlWriter.Formatting = "indented"
-    $xmlWriter.Indentation = $Indent
-    $xml.WriteContentTo($XmlWriter)
-    $XmlWriter.Flush()
-    $StringWriter.Flush()
-    Write-Output $StringWriter.ToString()
+   ## Load from file, if necessary
+   if($Path) { [xml]$xml = Get-Content $Path }
+   
+   $StringWriter = New-Object System.IO.StringWriter
+   $XmlWriter = New-Object System.Xml.XmlTextWriter $StringWriter
+   $xmlWriter.Formatting = "indented"
+   $xmlWriter.Indentation = $Indent
+   $xml.WriteContentTo($XmlWriter)
+   $XmlWriter.Flush()
+   $StringWriter.Flush()
+   Write-Output $StringWriter.ToString()
 }
 Set-Alias fxml Format-Xml -EA 0
 
