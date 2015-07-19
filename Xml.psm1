@@ -9,16 +9,21 @@
 # with the built in Select-Xml. It's equivalent to using Select-Xml ... | Select-Object -Expand Node
 
 # Version History:
-# Select-Xml 2.0 was the first script version I wrote, and it didn't function identically to the built-in Select-Xml with regards to parameter parsing
-# Select-Xml 2.1 matched the built-in Select-Xml parameter sets, it's now a drop-in replacement if you were using the original with: Select-Xml ... | Select-Object -Expand Node
-# Select-Xml 2.2 fixes a bug in the -Content parameterset where -RemoveNamespace was *presumed*
-# Added New-Xml and associated generation functions for my XML DSL
-
+# Select-Xml 2.0 This was the first script version I wrote.
+#                it didn't function identically to the built-in Select-Xml with regards to parameter parsing
+# Select-Xml 2.1 Matched the built-in Select-Xml parameter sets, it's now a drop-in replacement 
+#                BUT only if you were using the original with: Select-Xml ... | Select-Object -Expand Node
+# Select-Xml 2.2 Fixes a bug in the -Content parameterset where -RemoveNamespace was *presumed*
+# Version    3.0 Added New-Xml and associated generation functions for my XML DSL
+# Version    3.1 Fixed a really ugly bug in New-Xml in 3.0 which I should not have released
 
 $xlr8r = [type]::gettype("System.Management.Automation.TypeAccelerators")
 $xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
 $xlinq.GetTypes() | ? { $_.IsPublic -and !$_.IsSerializable -and $_.Name -ne "Extensions" -and !$xlr8r::Get[$_.Name] } | % {
   $xlr8r::Add( $_.Name, $_.FullName )
+}
+if(!$xlr8r::Get["Stack"]) {
+   $xlr8r::Add( "Stack", "System.Collections.Generic.Stack``1, System, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" )
 }
 
 function Format-XML {
@@ -46,7 +51,7 @@ Param(
     $StringWriter.Flush()
     Write-Output $StringWriter.ToString()
 }
-Set-Alias fxml Format-Xml -Option AllScope
+Set-Alias fxml Format-Xml
 
 function Select-Xml {
 #.Synopsis
@@ -156,7 +161,7 @@ END {
 }
 
 }
-Set-Alias slxml Select-Xml -Option AllScope
+Set-Alias slxml Select-Xml
 
 function Convert-Node {
 #.Synopsis 
@@ -244,7 +249,7 @@ END {
    }
 }
 }
-Set-Alias cvxml Convert-Xml -Option AllScope
+Set-Alias cvxml Convert-Xml
 
 function Remove-XmlNamespace {
 #.Synopsis
@@ -330,10 +335,12 @@ END {
    }
 }
 }
-Set-Alias rmns Remove-XmlNamespace -Option AllScope
+Set-Alias rmns Remove-XmlNamespace
+
+
 
 function New-XDocument {
-#.Synopsys
+#.Synopsis
 #	Creates a new XDocument (the new xml document type)
 #.Description
 #  This is the root for a new XML mini-dsl, akin to New-BootsWindow for XAML
@@ -474,16 +481,14 @@ Param(
    [PSObject[]]$args
 )
 BEGIN {
+   $script:NameSpaceStack = New-Object 'Stack[XNamespace]'
    if(![string]::IsNullOrEmpty( $root.NamespaceName )) {
-      Function New-QualifiedXElement {
-         Param([System.Xml.Linq.XName]$tag)
-         if([string]::IsNullOrEmpty( $tag.NamespaceName )) {
-            $tag = $($root.Namespace) + $tag
-         }
-         New-XElement $tag @args
-      }
-      Set-Alias xe New-QualifiedXElement
-   }
+		$script:NameSpaceStack.Push( $root.Namespace )
+   } elseif( $script:NameSpaceStack.Count -gt 0 ) {
+      $script:NameSpaceStack.Push( $script:NameSpaceStack.Peek() )
+   } else {
+      $script:NameSpaceStack.Push( $null )
+	}
 }
 PROCESS {
    #New-Object XDocument (New-Object XDeclaration "1.0", "UTF-8", "yes"),(
@@ -505,12 +510,14 @@ PROCESS {
       ))
 }
 END {
-   Set-Alias xe New-XElement
+   #if(![string]::IsNullOrEmpty( $root.NamespaceName )) {
+      $null = $script:NameSpaceStack.Pop()
+   #}
 }
 }
 
-Set-Alias xml New-XDocument -Option AllScope
-Set-Alias New-Xml New-XDocument -Option AllScope
+Set-Alias xml New-XDocument
+Set-Alias New-Xml New-XDocument
 
 function New-XAttribute {
 #.Synopsys
@@ -522,10 +529,10 @@ function New-XAttribute {
 #.Parameter value
 #  The attribute value
 Param([Parameter(Mandatory=$true)]$name,[Parameter(Mandatory=$true)]$value)
-   New-Object XAttribute $name,$value
+   New-Object XAttribute $name, $value
 }
-Set-Alias xa New-XAttribute -Option AllScope
-Set-Alias New-XmlAttribute New-XAttribute -Option AllScope
+Set-Alias xa New-XAttribute
+Set-Alias New-XmlAttribute New-XAttribute
 
 
 function New-XElement {
@@ -544,7 +551,19 @@ Param(
    [Parameter(Position=99, Mandatory = $false, ValueFromRemainingArguments=$true)]
    [PSObject[]]$args
 )
-  Write-Verbose $($args | %{ $_ | Out-String } | Out-String)
+BEGIN {
+	if([string]::IsNullOrEmpty( $tag.NamespaceName )) {
+		$tag = $($script:NameSpaceStack.Peek()) + $tag
+      if( $script:NameSpaceStack.Count -gt 0 ) {
+         $script:NameSpaceStack.Push( $script:NameSpaceStack.Peek() )
+      } else {
+         $script:NameSpaceStack.Push( $null )
+      }      
+	} else {
+      $script:NameSpaceStack.Push( $tag.Namespace )
+	}
+}
+PROCESS {
   New-Object XElement $(
      $tag
      while($args) {
@@ -554,14 +573,20 @@ Param(
         } elseif ( $value -is [ScriptBlock] -and "-Content".StartsWith($attrib)) {
            &$value
         } elseif ( $value -is [XNamespace]) {
-            New-XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-")),$value
+           New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-")), $value
         } else {
-           New-XAttribute $attrib.TrimStart("-"), $value
+           New-Object XAttribute $attrib.TrimStart("-"), $value
         }
      }
    )
 }
-Set-Alias xe New-XElement -Option AllScope
-Set-Alias New-XmlElement New-XElement -Option AllScope
+END {
+   #if(![string]::IsNullOrEmpty( $tag.NamespaceName )) {
+      $null = $script:NameSpaceStack.Pop()
+   #}
+}
+}
+Set-Alias xe New-XElement
+Set-Alias New-XmlElement New-XElement
 
-Export-ModuleMember -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Convert-Xml, Select-Xml, Format-Xml -alias *
+Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Convert-Xml, Select-Xml, Format-Xml
