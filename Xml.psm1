@@ -36,6 +36,12 @@
 #       - Updated Update-Xml to support adding nodes "before" and "after" other nodes, and to support "remove"ing nodes
 # Version    6.1 Update for PowerShell 3.0
 # Version    6.2 Minor tweak in exception handling for CliXml
+# Version    6.3 Added Remove-XmlElement to allow removing nodes or attributes
+#                This is something I specifically needed to remove "ignorable" namespaces 
+#                Specifically, the ones created by the Visual Studio Workflow designer (and perhaps other visual designers like Blend)
+#                Which I don't want to check into source control, because it makes diffing nearly impossible
+# Version    6.4 Fixed a bug on New-XElement for Rudy Shockaert (nice bug report, thanks!)
+# Version    6.5 Added -Parameters @{} parameter to New-XDocument to allow local variables to be passed into the module scope. *grumble*
 
 function Add-Accelerator {
 <#
@@ -105,8 +111,7 @@ $local:xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Cu
 $xlinq.GetTypes() | ? { $_.IsPublic -and !$_.IsSerializable -and $_.Name -ne "Extensions" -and !$xlr8r::Get[$_.Name] } | Add-Accelerator
 
 Add-Accelerator "Dictionary" "System.Collections.Generic.Dictionary``2, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
-Add-Accelerator "Dictionary", "System.Collections.Generic.Dictionary``2, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"
-Add-Accelerator "PSParser", "System.Management.Automation.PSParser, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35"
+Add-Accelerator "PSParser" "System.Management.Automation.PSParser, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35"
 }
 
 
@@ -220,7 +225,7 @@ param(
    [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true, ParameterSetName="Document")]
    [xml]$Xml
 ,
-   [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true, ParameterSetName="File")]
+   [Parameter(Position=0, Mandatory=$true, ValueFromPipelineByPropertyName=$true, ParameterSetName="File")]
    [Alias("PsPath")]
    [string]$Path
 ,
@@ -579,7 +584,7 @@ function Remove-XmlNamespace {
 #.Parameter Path
 #  Specifies the path and file names of the XML files to transform. Wildcards are permitted.
 #
-#  There will bne one output document for each matching input file.
+#  There will be one output document for each matching input file.
 #.Parameter Xml
 #  Specifies one or more XML documents to transform
 [CmdletBinding(DefaultParameterSetName="Xml")]
@@ -621,6 +626,121 @@ PROCESS {
 }
 Set-Alias rmns Remove-XmlNamespace -EA 0
 Set-Alias rmxns Remove-XmlNamespace -EA 0
+
+
+
+
+
+function Remove-XmlElement {
+#.Synopsis
+#  Removes specified elements (tags or attributes) or all elements from a specified namespace from an Xml document
+#.Description
+#  Runs an xml document through an XSL Transformation to remove tag namespaces from it if they exist.
+#  Entities are also naturally expanded
+#.Parameter Content
+#  Specifies a string that contains the XML to transform.
+#.Parameter Path
+#  Specifies the path and file names of the XML files to transform. Wildcards are permitted.
+#
+#  There will be one output document for each matching input file.
+#.Parameter Xml
+#  Specifies one or more XML documents to transform
+[CmdletBinding(DefaultParameterSetName="Xml")]
+PARAM(
+   [Parameter(Position=0,ParameterSetName="Xml")] #,Mandatory=$true
+   #[ValidateNotNullOrEmpty()]
+   [XNamespace[]]$Namespace
+,
+   [Parameter(Position=1,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+   [ValidateNotNullOrEmpty()]
+   [Alias("Node")]
+   [System.Xml.XmlNode[]]$Xml
+)
+BEGIN {
+   foreach($Node in @($Xml)) {
+      $Allspaces += Get-Namespace -Xml $Node
+
+      $nsManager = new-object System.Xml.XmlNamespaceManager $node.NameTable
+      foreach($ns in $Allspaces.GetEnumerator()) {
+          $nsManager.AddNamespace( $ns.Key, $ns.Value )
+      }
+
+      # If no namespaces are passed in, use the "ignorable" ones from XAML if there are any
+      if(!$Namespace) {
+         $root = $Node.DocumentElement
+         # $nsManager = new-object System.Xml.XmlNamespaceManager $Node.NameTable                       
+         $nsManager.AddNamespace("compat", "http://schemas.openxmlformats.org/markup-compatibility/2006")
+         if($ignorable = $root.SelectSingleNode("@compat:Ignorable",$nsManager)) {
+            foreach($prefix in $ignorable.get_InnerText().Split(" ")) {
+               $Namespace += $root.GetNamespaceOfPrefix($prefix)
+            }
+         }
+      }
+   }
+
+   
+   Write-Verbose "$Namespace"
+   $i = 0
+   $NSString = $(foreach($n in $Namespace) { "xmlns:n$i='$n'"; $i+=1 }) -Join " "
+   $EmptyTransforms = $(for($i =0; $i -lt $Namespace.Count;$i++) {
+      "<xsl:template match='n${i}:*'>
+      </xsl:template>
+      <xsl:template match='@n${i}:*'>
+      </xsl:template>"
+   })
+   
+   $XSLT = @"
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" $NSString>
+   <xsl:output method="xml" indent="yes"/>
+   <xsl:template match="@*|node()">
+      <xsl:copy>
+         <xsl:apply-templates select="@*|node()"/>
+      </xsl:copy>
+   </xsl:template>
+   $EmptyTransforms
+</xsl:stylesheet>
+"@
+   Write-Verbose $XSLT
+ 
+   $StyleSheet = New-Object System.Xml.Xsl.XslCompiledTransform
+   $StyleSheet.Load(([System.Xml.XmlReader]::Create((New-Object System.IO.StringReader $XSLT))))
+   [Text.StringBuilder]$XmlContent = [String]::Empty 
+}
+PROCESS {
+   $Xml | Convert-Node $StyleSheet
+}
+}
+#Set-Alias rmns Remove-XmlNamespace -EA 0
+#Set-Alias rmxns Remove-XmlNamespace -EA 0
+
+function Get-Namespace {
+param(
+   [Parameter(Position=0)]
+   [String[]]$Prefix = "*"
+,
+   [Parameter(Position=1,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+   [ValidateNotNullOrEmpty()]
+   [Alias("Node")]
+   [System.Xml.XmlNode[]]$Xml
+)
+   foreach($Node in @($Xml)) {
+      $results = @{}
+      if($Node -is [Xml.XmlDocument]) {
+         $Node = $Node.DocumentElement
+      }
+      foreach($ns in $Node.CreateNavigator().GetNamespacesInScope("All").GetEnumerator()) {
+         foreach($p in $Prefix) {
+            if($ns.Key -like $p) {
+               $results.Add($ns.Key, $ns.Value)
+               break;
+            }
+         }
+      }
+      $results
+   }
+}
+
+
 
 ######## Helper functions for working with CliXml
 
@@ -700,17 +820,6 @@ function New-XDocument {
 #.Description
 #  This is the root for a new XML mini-dsl, akin to New-BootsWindow for XAML
 #  It creates a new XDocument, and takes scritpblock(s) to define it's contents
-#.Parameter root
-#   The root node name
-#.Parameter version
-#   Optional: the XML version. Defaults to 1.0
-#.Parameter encoding
-#   Optional: the Encoding. Defaults to UTF-8
-#.Parameter standalone
-#  Optional: whether to specify standalone in the xml declaration. Defaults to "yes"
-#.Parameter args
-#   this is where all the dsl magic happens. Please see the Examples. :)
-#
 #.Example
 # [string]$xml = New-XDocument rss -version "2.0" {
 #    channel {
@@ -811,18 +920,27 @@ function New-XDocument {
 # 
 [CmdletBinding()]
 Param(
+   # The root node name
    [Parameter(Mandatory = $true, Position = 0)]
    [System.Xml.Linq.XName]$root
 ,
+   # Optional: the XML version. Defaults to 1.0
    [Parameter(Mandatory = $false)]
    [string]$Version = "1.0"
 ,
+   # Optional: the Encoding. Defaults to UTF-8
    [Parameter(Mandatory = $false)]
    [string]$Encoding = "UTF-8"
 ,
+   # Optional: whether to specify standalone in the xml declaration. Defaults to "yes"
    [Parameter(Mandatory = $false)]
    [string]$Standalone = "yes"
 ,
+   # A Hashtable of parameters which should be available as local variables to the scriptblock in args
+   [Parameter(Mandatory = $false)]
+   [hashtable]$Parameters
+,
+   # this is where all the dsl magic happens. Please see the Examples. :)
    [AllowNull()][AllowEmptyString()][AllowEmptyCollection()]
    [Parameter(Position=99, Mandatory = $false, ValueFromRemainingArguments=$true)]
    [PSObject[]]$args
@@ -834,6 +952,11 @@ BEGIN {
    }
 }
 PROCESS {
+   if($Parameters) {
+      foreach($key in $Parameters.Keys) {
+         Set-Variable $key $Parameters.$key -Scope Script
+      }
+   }
    New-Object XDocument (New-Object XDeclaration $Version, $Encoding, $standalone),(
       New-Object XElement $(
          $root
@@ -843,10 +966,11 @@ PROCESS {
                # Write-Verbose "Preparsed DSL: $attrib"
                $attrib = ConvertFrom-XmlDsl $attrib
                Write-Verbose "Reparsed DSL: $attrib"
-               &$attrib
+               & $attrib
             } elseif ( $value -is [ScriptBlock] -and "-CONTENT".StartsWith($attrib.TrimEnd(':').ToUpper())) {
                $value = ConvertFrom-XmlDsl $value
-               &$value
+               Write-Verbose "Reparsed DSL: $value"
+               & $value
             } elseif ( $value -is [XNamespace]) {
                New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-").TrimEnd(':')), $value
                $script:NameSpaceHash.Add($attrib.TrimStart("-").TrimEnd(':'), $value)
@@ -900,21 +1024,23 @@ Param(
 PROCESS {
   New-Object XElement $(
      $tag
+     Write-Verbose "New-XElement $tag $($args -join ',')"
      while($args) {
         $attrib, $value, $args = $args
         if($attrib -is [ScriptBlock]) { # then it's content
-           &$attrib
+           & $attrib
         } elseif ( $value -is [ScriptBlock] -and "-CONTENT".StartsWith($attrib.TrimEnd(':').ToUpper())) { # then it's content
-           &$value
+           & $value
         } elseif ( $value -is [XNamespace]) {
+           Write-Verbose "New XAttribute xmlns: $($attrib.TrimStart("-").TrimEnd(':')) = $value"
            New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-").TrimEnd(':')), $value
            $script:NameSpaceHash.Add($attrib.TrimStart("-").TrimEnd(':'), $value)
-        } elseif($value -match "-(?!\d)\w") {
+        } elseif($value -match "^-(?!\d)\w") {
             $args = @($value)+@($args)
         } elseif($value -ne $null) {
+           Write-Verbose "New XAttribute $($attrib.TrimStart("-").TrimEnd(':')) = $value"
            New-Object XAttribute $attrib.TrimStart("-").TrimEnd(':'), $value
         }        
-        
      }
    )
 }
@@ -927,20 +1053,21 @@ Param([ScriptBlock]$script)
    $parserrors = $null
    $global:tokens = [PSParser]::Tokenize( $script, [ref]$parserrors )
    [Array]$duds = $global:tokens | Where-Object { $_.Type -eq "Command" -and !$_.Content.Contains('-') -and ($(Get-Command $_.Content -Type Cmdlet,Function,ExternalScript -EA 0) -eq $Null) }
-   [Array]::Reverse( $duds )
-   
+   if($duds) {
+	   [Array]::Reverse( $duds )
+   }
    [string[]]$ScriptText = "$script" -split "`n"
 
    ForEach($token in $duds ) {
-      # replace : notation with namespace notation
-      if( $token.Content.Contains(":") ) {
-         $key, $localname = $token.Content -split ":"
-         $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[$key] + $localname) + "'" )
-      } else {
-         $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[''] + $token.Content) + "'" )
-      }
-      # insert 'xe' before everything (unless it's a valid command)
-      $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Insert( $token.StartColumn -1, "xe " )
+	  # replace : notation with namespace notation
+	  if( $token.Content.Contains(":") ) {
+		 $key, $localname = $token.Content -split ":"
+		 $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[$key] + $localname) + "'" )
+	  } else {
+		 $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[''] + $token.Content) + "'" )
+	  }
+	  # insert 'xe' before everything (unless it's a valid command)
+	  $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Insert( $token.StartColumn -1, "xe " )
    }
    Write-Output ([ScriptBlock]::Create( ($ScriptText -join "`n") ))
 }
@@ -956,13 +1083,13 @@ Param([ScriptBlock]$script)
    #  }
 #  }
    
-Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Get-XmlContent, Set-XmlContent, ConvertTo-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml
+Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Remove-XmlElement, Get-Namespace, Get-XmlContent, Set-XmlContent, ConvertTo-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml
 
 # SIG # Begin signature block
-# MIIdZgYJKoZIhvcNAQcCoIIdVzCCHVMCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
+# MIIZEwYJKoZIhvcNAQcCoIIZBDCCGQACAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUtjycTLbprXSw4krXhTfs6eQf
-# geWgghkkMIIDnzCCAoegAwIBAgIQeaKlhfnRFUIT2bg+9raN7TANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUSzpk+TjIGQhlVoEBJG9eVnhA
+# vr+gghTRMIIDnzCCAoegAwIBAgIQeaKlhfnRFUIT2bg+9raN7TANBgkqhkiG9w0B
 # AQUFADBTMQswCQYDVQQGEwJVUzEXMBUGA1UEChMOVmVyaVNpZ24sIEluYy4xKzAp
 # BgNVBAMTIlZlcmlTaWduIFRpbWUgU3RhbXBpbmcgU2VydmljZXMgQ0EwHhcNMTIw
 # NTAxMDAwMDAwWhcNMTIxMjMxMjM1OTU5WjBiMQswCQYDVQQGEwJVUzEdMBsGA1UE
@@ -1001,119 +1128,96 @@ Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XEleme
 # HTAbpBkwFzEVMBMGA1UEAxMMVFNBMjA0OC0xLTUzMA0GCSqGSIb3DQEBBQUAA4GB
 # AEpr+epYwkQcMYl5mSuWv4KsAdYcTM2wilhu3wgpo17IypMT5wRSDe9HJy8AOLDk
 # yZNOmtQiYhX3PzchT3AxgPGLOIez6OiXAP7PVZZOJNKpJ056rrdhQfMqzufJ2V7d
-# uyuFPrWdtdnhV/++tMV+9c8MnvCX/ivTO1IbGzgn9z9KMIIETzCCA7igAwIBAgIE
-# BydYPTANBgkqhkiG9w0BAQUFADB1MQswCQYDVQQGEwJVUzEYMBYGA1UEChMPR1RF
-# IENvcnBvcmF0aW9uMScwJQYDVQQLEx5HVEUgQ3liZXJUcnVzdCBTb2x1dGlvbnMs
-# IEluYy4xIzAhBgNVBAMTGkdURSBDeWJlclRydXN0IEdsb2JhbCBSb290MB4XDTEw
-# MDExMzE5MjAzMloXDTE1MDkzMDE4MTk0N1owbDELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTErMCkG
-# A1UEAxMiRGlnaUNlcnQgSGlnaCBBc3N1cmFuY2UgRVYgUm9vdCBDQTCCASIwDQYJ
-# KoZIhvcNAQEBBQADggEPADCCAQoCggEBAMbM5XPm+9S75S0tMqbf5YE/yc0lSbZx
-# KsPVlDRnogocsF9ppkCxxLeyj9CYpKlBWTrT3JTWPNt0OKRKzE0lgvdKpVMSOO7z
-# SW1xkX5jtqumX8OkhPhPYlG++MXs2ziS4wblCJEMxChBVfvLWokVfnHoNb9Ncgk9
-# vjo4UFt3MRuNs8ckRZqnrG0AFFoEt7oT61EKmEFBIk5lYYeBQVCmeVyJ3hlKV9Uu
-# 5l0cUyx+mM0aBhakaHPQNAQTXKFx01p8VdteZOE3hzBWBOURtCmAEvF5OYiiAhF8
-# J2a3iLd48soKqDirCmTCv2ZdlYTBoSUeh10aUAsgEsxBu24LUTi4S8sCAwEAAaOC
-# AW8wggFrMBIGA1UdEwEB/wQIMAYBAf8CAQEwUwYDVR0gBEwwSjBIBgkrBgEEAbE+
-# AQAwOzA5BggrBgEFBQcCARYtaHR0cDovL2N5YmVydHJ1c3Qub21uaXJvb3QuY29t
-# L3JlcG9zaXRvcnkuY2ZtMA4GA1UdDwEB/wQEAwIBBjCBiQYDVR0jBIGBMH+heaR3
-# MHUxCzAJBgNVBAYTAlVTMRgwFgYDVQQKEw9HVEUgQ29ycG9yYXRpb24xJzAlBgNV
-# BAsTHkdURSBDeWJlclRydXN0IFNvbHV0aW9ucywgSW5jLjEjMCEGA1UEAxMaR1RF
-# IEN5YmVyVHJ1c3QgR2xvYmFsIFJvb3SCAgGlMEUGA1UdHwQ+MDwwOqA4oDaGNGh0
-# dHA6Ly93d3cucHVibGljLXRydXN0LmNvbS9jZ2ktYmluL0NSTC8yMDE4L2NkcC5j
-# cmwwHQYDVR0OBBYEFLE+w2kD+L9HAdSYJhoIAu9jZCvDMA0GCSqGSIb3DQEBBQUA
-# A4GBAC52hdk3lm2vifMGeIIxxEYHH2XJjrPJVHjm0ULfdS4eVer3+psEwHV70Xk8
-# Bex5xFLdpgPXp1CZPwVZ2sZV9IacDWejSQSVMh3Hh+yFr2Ru1cVfCadAfRa6SQ2i
-# /fbfVTBs13jGuc9YKWQWTKMggUexRJKEFhtvSrwhxgo97TPKMIIGnzCCBYegAwIB
-# AgIQDmkGmMIUyHq1tgS5FjzRkDANBgkqhkiG9w0BAQUFADBzMQswCQYDVQQGEwJV
-# UzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNlcnQu
-# Y29tMTIwMAYDVQQDEylEaWdpQ2VydCBIaWdoIEFzc3VyYW5jZSBDb2RlIFNpZ25p
-# bmcgQ0EtMTAeFw0xMjAzMjAwMDAwMDBaFw0xMzAzMjIxMjAwMDBaMG0xCzAJBgNV
-# BAYTAlVTMREwDwYDVQQIEwhOZXcgWW9yazEXMBUGA1UEBxMOV2VzdCBIZW5yaWV0
-# dGExGDAWBgNVBAoTD0pvZWwgSC4gQmVubmV0dDEYMBYGA1UEAxMPSm9lbCBILiBC
-# ZW5uZXR0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2ogGAG89d1jM
-# fRJv2d3U1lCsW8ok7GkjnLYDn0zC1ALq11rWN5NVwVbn133i+KV0O8kM5vd2M7xE
-# 8CnVAgybjkrvRD2IqMtp4SrwQuiGiVGsNVWO3vSLHcWsS/I7N0UIpS5PhTuFB4Pc
-# Oy/MHR4F2g6JLMrAtkpYWxauAFZfFwuEfm6vqWobHTDt5wG+zqOTxMSi1UvL5fEM
-# DoejGqqriIx5mKDzrvUb/ALNKZ1rGPWlT7O0/UHrV5VuOfgij4XVKBAdcg9JLxky
-# AEIJ+VvVQ2Jn3lVONCCHbfu5IVhddMru81U/v5Wrj80Zrwh2TH25qlclUKr6eXRL
-# tP+xFm23CwIDAQABo4IDMzCCAy8wHwYDVR0jBBgwFoAUl0gD6xUIa7myWCPMlC7x
-# xmXSZI4wHQYDVR0OBBYEFJicRKq/XsBWRuKzU6eTUCBCCU65MA4GA1UdDwEB/wQE
-# AwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzBpBgNVHR8EYjBgMC6gLKAqhihodHRw
-# Oi8vY3JsMy5kaWdpY2VydC5jb20vaGEtY3MtMjAxMWEuY3JsMC6gLKAqhihodHRw
-# Oi8vY3JsNC5kaWdpY2VydC5jb20vaGEtY3MtMjAxMWEuY3JsMIIBxAYDVR0gBIIB
-# uzCCAbcwggGzBglghkgBhv1sAwEwggGkMDoGCCsGAQUFBwIBFi5odHRwOi8vd3d3
-# LmRpZ2ljZXJ0LmNvbS9zc2wtY3BzLXJlcG9zaXRvcnkuaHRtMIIBZAYIKwYBBQUH
-# AgIwggFWHoIBUgBBAG4AeQAgAHUAcwBlACAAbwBmACAAdABoAGkAcwAgAEMAZQBy
-# AHQAaQBmAGkAYwBhAHQAZQAgAGMAbwBuAHMAdABpAHQAdQB0AGUAcwAgAGEAYwBj
-# AGUAcAB0AGEAbgBjAGUAIABvAGYAIAB0AGgAZQAgAEQAaQBnAGkAQwBlAHIAdAAg
-# AEMAUAAvAEMAUABTACAAYQBuAGQAIAB0AGgAZQAgAFIAZQBsAHkAaQBuAGcAIABQ
-# AGEAcgB0AHkAIABBAGcAcgBlAGUAbQBlAG4AdAAgAHcAaABpAGMAaAAgAGwAaQBt
-# AGkAdAAgAGwAaQBhAGIAaQBsAGkAdAB5ACAAYQBuAGQAIABhAHIAZQAgAGkAbgBj
-# AG8AcgBwAG8AcgBhAHQAZQBkACAAaABlAHIAZQBpAG4AIABiAHkAIAByAGUAZgBl
-# AHIAZQBuAGMAZQAuMIGGBggrBgEFBQcBAQR6MHgwJAYIKwYBBQUHMAGGGGh0dHA6
-# Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBQBggrBgEFBQcwAoZEaHR0cDovL2NhY2VydHMu
-# ZGlnaWNlcnQuY29tL0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUNvZGVTaWduaW5nQ0Et
-# MS5jcnQwDAYDVR0TAQH/BAIwADANBgkqhkiG9w0BAQUFAAOCAQEAHIfeYpO0Jtdi
-# /TpcI6eWQIYU2ALO847Q91jLE6WiU6u8wN6tkHqgeOls070SDUK+C1rVoXKKZ0Je
-# c2k1dYukKPkyf3qURPyh/aC3hJ0Wwbje7fK79Lt9ZHwJORpesJrwa8T63l3qLLLl
-# PaIYo/bqiMpNZRfOclukKg2hO67yMaQl8DEL/D5UP1XZShF2zbauH627zEC5KXGZ
-# Y2yUbmWG2N0oHxr+q4Gyfd0MPtU5avWOILB0ZsN+br+SCVVK6nKzauXMk4HXmKHa
-# X7cysqpmQiFb7/J7tPQ037KQKHCY/Z+fl0arRCiHih/Q/5owv51WSKPiaUrkBvdJ
-# 0mKVK+McHzCCBr8wggWnoAMCAQICEAgcV+5dcOuboLFSDHKcGwkwDQYJKoZIhvcN
-# AQEFBQAwbDELMAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcG
-# A1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTErMCkGA1UEAxMiRGlnaUNlcnQgSGlnaCBB
-# c3N1cmFuY2UgRVYgUm9vdCBDQTAeFw0xMTAyMTAxMjAwMDBaFw0yNjAyMTAxMjAw
-# MDBaMHMxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNV
-# BAsTEHd3dy5kaWdpY2VydC5jb20xMjAwBgNVBAMTKURpZ2lDZXJ0IEhpZ2ggQXNz
-# dXJhbmNlIENvZGUgU2lnbmluZyBDQS0xMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A
-# MIIBCgKCAQEAxfkj5pQnxIAUpIAyX0CjjW9wwOU2cXE6daSqGpKUiV6sI3HLTmd9
-# QT+q40u3e76dwag4j2kvOiTpd1kSx2YEQ8INJoKJQBnyLOrnTOd8BRq4/4gJTyY3
-# 7zqk+iJsiMlKG2HyrhBeb7zReZtZGGDl7im1AyqkzvGDGU9pBXMoCfsiEJMioJAZ
-# Gkwx8tMr2IRDrzxj/5jbINIJK1TB6v1qg+cQoxJx9dbX4RJ61eBWWs7qAVtoZVvB
-# P1hSM6k1YU4iy4HKNqMSywbWzxtNGH65krkSz0Am2Jo2hbMVqkeThGsHu7zVs94l
-# ABGJAGjBKTzqPi3uUKvXHDAGeDylECNnkQIDAQABo4IDVDCCA1AwDgYDVR0PAQH/
-# BAQDAgEGMBMGA1UdJQQMMAoGCCsGAQUFBwMDMIIBwwYDVR0gBIIBujCCAbYwggGy
-# BghghkgBhv1sAzCCAaQwOgYIKwYBBQUHAgEWLmh0dHA6Ly93d3cuZGlnaWNlcnQu
-# Y29tL3NzbC1jcHMtcmVwb3NpdG9yeS5odG0wggFkBggrBgEFBQcCAjCCAVYeggFS
-# AEEAbgB5ACAAdQBzAGUAIABvAGYAIAB0AGgAaQBzACAAQwBlAHIAdABpAGYAaQBj
-# AGEAdABlACAAYwBvAG4AcwB0AGkAdAB1AHQAZQBzACAAYQBjAGMAZQBwAHQAYQBu
-# AGMAZQAgAG8AZgAgAHQAaABlACAARABpAGcAaQBDAGUAcgB0ACAARQBWACAAQwBQ
-# AFMAIABhAG4AZAAgAHQAaABlACAAUgBlAGwAeQBpAG4AZwAgAFAAYQByAHQAeQAg
-# AEEAZwByAGUAZQBtAGUAbgB0ACAAdwBoAGkAYwBoACAAbABpAG0AaQB0ACAAbABp
-# AGEAYgBpAGwAaQB0AHkAIABhAG4AZAAgAGEAcgBlACAAaQBuAGMAbwByAHAAbwBy
-# AGEAdABlAGQAIABoAGUAcgBlAGkAbgAgAGIAeQAgAHIAZQBmAGUAcgBlAG4AYwBl
-# AC4wDwYDVR0TAQH/BAUwAwEB/zB/BggrBgEFBQcBAQRzMHEwJAYIKwYBBQUHMAGG
-# GGh0dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBJBggrBgEFBQcwAoY9aHR0cDovL2Nh
-# Y2VydHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUVWUm9vdENB
-# LmNydDCBjwYDVR0fBIGHMIGEMECgPqA8hjpodHRwOi8vY3JsMy5kaWdpY2VydC5j
-# b20vRGlnaUNlcnRIaWdoQXNzdXJhbmNlRVZSb290Q0EuY3JsMECgPqA8hjpodHRw
-# Oi8vY3JsNC5kaWdpY2VydC5jb20vRGlnaUNlcnRIaWdoQXNzdXJhbmNlRVZSb290
-# Q0EuY3JsMB0GA1UdDgQWBBSXSAPrFQhrubJYI8yULvHGZdJkjjAfBgNVHSMEGDAW
-# gBSxPsNpA/i/RwHUmCYaCALvY2QrwzANBgkqhkiG9w0BAQUFAAOCAQEAggXpha+n
-# TL+vzj2y6mCxaN5nwtLLJuDDL5u1aw5TkIX2m+A1Av/6aYOqtHQyFDwuEEwomwqt
-# CAn584QRk4/LYEBW6XcvabKDmVWrRySWy39LsBC0l7/EpZkG/o7sFFAeXleXy0e5
-# NNn8OqL/UCnCCmIE7t6WOm+gwoUPb/wI5DJ704SuaWAJRiac6PD//4bZyAk6ZsOn
-# No8YT+ixlpIuTr4LpzOQrrxuT/F+jbRGDmT5WQYiIWQAS+J6CAPnvImQnkJPAcC2
-# Fn916kaypVQvjJPNETY0aihXzJQ/6XzIGAMDBH5D2vmXoVlH2hKq4G04AF01K8Ui
-# hssGyrx6TT0mRjGCA6wwggOoAgEBMIGHMHMxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
-# EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xMjAwBgNV
-# BAMTKURpZ2lDZXJ0IEhpZ2ggQXNzdXJhbmNlIENvZGUgU2lnbmluZyBDQS0xAhAO
-# aQaYwhTIerW2BLkWPNGQMAkGBSsOAwIaBQCgeDAYBgorBgEEAYI3AgEMMQowCKAC
-# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMCMGCSqGSIb3DQEJBDEWBBTBjSgoFuawl9Ao5Tv2xqPO
-# 3Kl4sDANBgkqhkiG9w0BAQEFAASCAQA5AQUWDBjbcGyAveEi6lzwSWZf7xIx87zm
-# U80EVwu1VDqIcgN4jyUMf7ni8qrZsSZoc4e4xj3tSRmMjZPd7M5C+DL8ZBitU4VV
-# X6VT86ANs+njcZ+2eVZtZW9jYYG42TJN507NcDL1KilaSRyrUUJfBcSFaa+UN2pQ
-# n0/GNPYoZxZwdho0IVdIJifBO61IqYVCWNL3CNfaTvBVVbEXA70LG3yKUoQdEvpV
-# /3Eyd3fJzdmHZGpKwq8Wf/tlMN7dVM59GG0SGE81FASCJNno18MKKY7vWLGoo3Fc
-# drZCFDm8Wq/Q/M10mKEFWzlztThqxeUx/3oA2TKLM2eUtA4PVw+QoYIBfzCCAXsG
-# CSqGSIb3DQEJBjGCAWwwggFoAgEBMGcwUzELMAkGA1UEBhMCVVMxFzAVBgNVBAoT
-# DlZlcmlTaWduLCBJbmMuMSswKQYDVQQDEyJWZXJpU2lnbiBUaW1lIFN0YW1waW5n
-# IFNlcnZpY2VzIENBAhB5oqWF+dEVQhPZuD72to3tMAkGBSsOAwIaBQCgXTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xMjA2MjEwNTA1
-# MTJaMCMGCSqGSIb3DQEJBDEWBBS/y8ZQJu39fwfbrPlsNYHdOEbIWjANBgkqhkiG
-# 9w0BAQEFAASBgBVlS+jMlhYAmeerqAJAXyX18fe2m/quZkq09V6c2OOSzWmcHMwT
-# +sgJDVKPmImnn7YT0tL8SyIflxmVVapR3pAnzFq5XXVmYqxu3+g1rSRxUQyCmEwU
-# p84MHiU+17yfE+KbvT0/Y+jv71MnbkUOeqAKH2+fGdiR6pSO+zKoiH/q
+# uyuFPrWdtdnhV/++tMV+9c8MnvCX/ivTO1IbGzgn9z9KMIIGnzCCBYegAwIBAgIQ
+# DmkGmMIUyHq1tgS5FjzRkDANBgkqhkiG9w0BAQUFADBzMQswCQYDVQQGEwJVUzEV
+# MBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNlcnQuY29t
+# MTIwMAYDVQQDEylEaWdpQ2VydCBIaWdoIEFzc3VyYW5jZSBDb2RlIFNpZ25pbmcg
+# Q0EtMTAeFw0xMjAzMjAwMDAwMDBaFw0xMzAzMjIxMjAwMDBaMG0xCzAJBgNVBAYT
+# AlVTMREwDwYDVQQIEwhOZXcgWW9yazEXMBUGA1UEBxMOV2VzdCBIZW5yaWV0dGEx
+# GDAWBgNVBAoTD0pvZWwgSC4gQmVubmV0dDEYMBYGA1UEAxMPSm9lbCBILiBCZW5u
+# ZXR0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2ogGAG89d1jMfRJv
+# 2d3U1lCsW8ok7GkjnLYDn0zC1ALq11rWN5NVwVbn133i+KV0O8kM5vd2M7xE8CnV
+# AgybjkrvRD2IqMtp4SrwQuiGiVGsNVWO3vSLHcWsS/I7N0UIpS5PhTuFB4PcOy/M
+# HR4F2g6JLMrAtkpYWxauAFZfFwuEfm6vqWobHTDt5wG+zqOTxMSi1UvL5fEMDoej
+# GqqriIx5mKDzrvUb/ALNKZ1rGPWlT7O0/UHrV5VuOfgij4XVKBAdcg9JLxkyAEIJ
+# +VvVQ2Jn3lVONCCHbfu5IVhddMru81U/v5Wrj80Zrwh2TH25qlclUKr6eXRLtP+x
+# Fm23CwIDAQABo4IDMzCCAy8wHwYDVR0jBBgwFoAUl0gD6xUIa7myWCPMlC7xxmXS
+# ZI4wHQYDVR0OBBYEFJicRKq/XsBWRuKzU6eTUCBCCU65MA4GA1UdDwEB/wQEAwIH
+# gDATBgNVHSUEDDAKBggrBgEFBQcDAzBpBgNVHR8EYjBgMC6gLKAqhihodHRwOi8v
+# Y3JsMy5kaWdpY2VydC5jb20vaGEtY3MtMjAxMWEuY3JsMC6gLKAqhihodHRwOi8v
+# Y3JsNC5kaWdpY2VydC5jb20vaGEtY3MtMjAxMWEuY3JsMIIBxAYDVR0gBIIBuzCC
+# AbcwggGzBglghkgBhv1sAwEwggGkMDoGCCsGAQUFBwIBFi5odHRwOi8vd3d3LmRp
+# Z2ljZXJ0LmNvbS9zc2wtY3BzLXJlcG9zaXRvcnkuaHRtMIIBZAYIKwYBBQUHAgIw
+# ggFWHoIBUgBBAG4AeQAgAHUAcwBlACAAbwBmACAAdABoAGkAcwAgAEMAZQByAHQA
+# aQBmAGkAYwBhAHQAZQAgAGMAbwBuAHMAdABpAHQAdQB0AGUAcwAgAGEAYwBjAGUA
+# cAB0AGEAbgBjAGUAIABvAGYAIAB0AGgAZQAgAEQAaQBnAGkAQwBlAHIAdAAgAEMA
+# UAAvAEMAUABTACAAYQBuAGQAIAB0AGgAZQAgAFIAZQBsAHkAaQBuAGcAIABQAGEA
+# cgB0AHkAIABBAGcAcgBlAGUAbQBlAG4AdAAgAHcAaABpAGMAaAAgAGwAaQBtAGkA
+# dAAgAGwAaQBhAGIAaQBsAGkAdAB5ACAAYQBuAGQAIABhAHIAZQAgAGkAbgBjAG8A
+# cgBwAG8AcgBhAHQAZQBkACAAaABlAHIAZQBpAG4AIABiAHkAIAByAGUAZgBlAHIA
+# ZQBuAGMAZQAuMIGGBggrBgEFBQcBAQR6MHgwJAYIKwYBBQUHMAGGGGh0dHA6Ly9v
+# Y3NwLmRpZ2ljZXJ0LmNvbTBQBggrBgEFBQcwAoZEaHR0cDovL2NhY2VydHMuZGln
+# aWNlcnQuY29tL0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUNvZGVTaWduaW5nQ0EtMS5j
+# cnQwDAYDVR0TAQH/BAIwADANBgkqhkiG9w0BAQUFAAOCAQEAHIfeYpO0Jtdi/Tpc
+# I6eWQIYU2ALO847Q91jLE6WiU6u8wN6tkHqgeOls070SDUK+C1rVoXKKZ0Jec2k1
+# dYukKPkyf3qURPyh/aC3hJ0Wwbje7fK79Lt9ZHwJORpesJrwa8T63l3qLLLlPaIY
+# o/bqiMpNZRfOclukKg2hO67yMaQl8DEL/D5UP1XZShF2zbauH627zEC5KXGZY2yU
+# bmWG2N0oHxr+q4Gyfd0MPtU5avWOILB0ZsN+br+SCVVK6nKzauXMk4HXmKHaX7cy
+# sqpmQiFb7/J7tPQ037KQKHCY/Z+fl0arRCiHih/Q/5owv51WSKPiaUrkBvdJ0mKV
+# K+McHzCCBr8wggWnoAMCAQICEAgcV+5dcOuboLFSDHKcGwkwDQYJKoZIhvcNAQEF
+# BQAwbDELMAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UE
+# CxMQd3d3LmRpZ2ljZXJ0LmNvbTErMCkGA1UEAxMiRGlnaUNlcnQgSGlnaCBBc3N1
+# cmFuY2UgRVYgUm9vdCBDQTAeFw0xMTAyMTAxMjAwMDBaFw0yNjAyMTAxMjAwMDBa
+# MHMxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsT
+# EHd3dy5kaWdpY2VydC5jb20xMjAwBgNVBAMTKURpZ2lDZXJ0IEhpZ2ggQXNzdXJh
+# bmNlIENvZGUgU2lnbmluZyBDQS0xMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB
+# CgKCAQEAxfkj5pQnxIAUpIAyX0CjjW9wwOU2cXE6daSqGpKUiV6sI3HLTmd9QT+q
+# 40u3e76dwag4j2kvOiTpd1kSx2YEQ8INJoKJQBnyLOrnTOd8BRq4/4gJTyY37zqk
+# +iJsiMlKG2HyrhBeb7zReZtZGGDl7im1AyqkzvGDGU9pBXMoCfsiEJMioJAZGkwx
+# 8tMr2IRDrzxj/5jbINIJK1TB6v1qg+cQoxJx9dbX4RJ61eBWWs7qAVtoZVvBP1hS
+# M6k1YU4iy4HKNqMSywbWzxtNGH65krkSz0Am2Jo2hbMVqkeThGsHu7zVs94lABGJ
+# AGjBKTzqPi3uUKvXHDAGeDylECNnkQIDAQABo4IDVDCCA1AwDgYDVR0PAQH/BAQD
+# AgEGMBMGA1UdJQQMMAoGCCsGAQUFBwMDMIIBwwYDVR0gBIIBujCCAbYwggGyBghg
+# hkgBhv1sAzCCAaQwOgYIKwYBBQUHAgEWLmh0dHA6Ly93d3cuZGlnaWNlcnQuY29t
+# L3NzbC1jcHMtcmVwb3NpdG9yeS5odG0wggFkBggrBgEFBQcCAjCCAVYeggFSAEEA
+# bgB5ACAAdQBzAGUAIABvAGYAIAB0AGgAaQBzACAAQwBlAHIAdABpAGYAaQBjAGEA
+# dABlACAAYwBvAG4AcwB0AGkAdAB1AHQAZQBzACAAYQBjAGMAZQBwAHQAYQBuAGMA
+# ZQAgAG8AZgAgAHQAaABlACAARABpAGcAaQBDAGUAcgB0ACAARQBWACAAQwBQAFMA
+# IABhAG4AZAAgAHQAaABlACAAUgBlAGwAeQBpAG4AZwAgAFAAYQByAHQAeQAgAEEA
+# ZwByAGUAZQBtAGUAbgB0ACAAdwBoAGkAYwBoACAAbABpAG0AaQB0ACAAbABpAGEA
+# YgBpAGwAaQB0AHkAIABhAG4AZAAgAGEAcgBlACAAaQBuAGMAbwByAHAAbwByAGEA
+# dABlAGQAIABoAGUAcgBlAGkAbgAgAGIAeQAgAHIAZQBmAGUAcgBlAG4AYwBlAC4w
+# DwYDVR0TAQH/BAUwAwEB/zB/BggrBgEFBQcBAQRzMHEwJAYIKwYBBQUHMAGGGGh0
+# dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBJBggrBgEFBQcwAoY9aHR0cDovL2NhY2Vy
+# dHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUVWUm9vdENBLmNy
+# dDCBjwYDVR0fBIGHMIGEMECgPqA8hjpodHRwOi8vY3JsMy5kaWdpY2VydC5jb20v
+# RGlnaUNlcnRIaWdoQXNzdXJhbmNlRVZSb290Q0EuY3JsMECgPqA8hjpodHRwOi8v
+# Y3JsNC5kaWdpY2VydC5jb20vRGlnaUNlcnRIaWdoQXNzdXJhbmNlRVZSb290Q0Eu
+# Y3JsMB0GA1UdDgQWBBSXSAPrFQhrubJYI8yULvHGZdJkjjAfBgNVHSMEGDAWgBSx
+# PsNpA/i/RwHUmCYaCALvY2QrwzANBgkqhkiG9w0BAQUFAAOCAQEAggXpha+nTL+v
+# zj2y6mCxaN5nwtLLJuDDL5u1aw5TkIX2m+A1Av/6aYOqtHQyFDwuEEwomwqtCAn5
+# 84QRk4/LYEBW6XcvabKDmVWrRySWy39LsBC0l7/EpZkG/o7sFFAeXleXy0e5NNn8
+# OqL/UCnCCmIE7t6WOm+gwoUPb/wI5DJ704SuaWAJRiac6PD//4bZyAk6ZsOnNo8Y
+# T+ixlpIuTr4LpzOQrrxuT/F+jbRGDmT5WQYiIWQAS+J6CAPnvImQnkJPAcC2Fn91
+# 6kaypVQvjJPNETY0aihXzJQ/6XzIGAMDBH5D2vmXoVlH2hKq4G04AF01K8UihssG
+# yrx6TT0mRjGCA6wwggOoAgEBMIGHMHMxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
+# aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xMjAwBgNVBAMT
+# KURpZ2lDZXJ0IEhpZ2ggQXNzdXJhbmNlIENvZGUgU2lnbmluZyBDQS0xAhAOaQaY
+# whTIerW2BLkWPNGQMAkGBSsOAwIaBQCgeDAYBgorBgEEAYI3AgEMMQowCKACgACh
+# AoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAM
+# BgorBgEEAYI3AgEVMCMGCSqGSIb3DQEJBDEWBBRl7Z8Ka4sa/4B0YuthUiWk0DOI
+# hTANBgkqhkiG9w0BAQEFAASCAQCb7PNuJWsmOxRPLG4o70iH1/kheuSC45XIj9Rj
+# 3QHKqH7UReswMWNnpEBwM3w0kXMSHeLvuztx4hHtCDXVaf8sugtvZz/i7xjEdU3Q
+# QF1DSDEPYcth/zk1qeGP2FpBnR/hGF/wup53XR93yIyXgJfxJjYFBsUL7A6b9Vdg
+# 4/h14aOTv4IQPe8LLsr14QXaXRrcBScAFVqcVCoR5zu003A++RNaiv4yrI6chp2A
+# ImKWwa9wBtny0WFaltAnlAAnh+yccn/a77GEVNZgTNzmdOQv6Fh+ZNqCSTfAQRd6
+# bC7FDlIqvt1DWl8hADWmswz6RR8CR2dijPg27yWNm6HLmM/doYIBfzCCAXsGCSqG
+# SIb3DQEJBjGCAWwwggFoAgEBMGcwUzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDlZl
+# cmlTaWduLCBJbmMuMSswKQYDVQQDEyJWZXJpU2lnbiBUaW1lIFN0YW1waW5nIFNl
+# cnZpY2VzIENBAhB5oqWF+dEVQhPZuD72to3tMAkGBSsOAwIaBQCgXTAYBgkqhkiG
+# 9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0xMjA4MDIxNTA3MjRa
+# MCMGCSqGSIb3DQEJBDEWBBRPzjZ9FFQI4JywxRW/O/s/eWMzPjANBgkqhkiG9w0B
+# AQEFAASBgJkIUKOPt7BfL9hooks1U6ZY1ft9lNnIB1/iOYsD4QqWK+FSv6w4oM0T
+# 4S7mwPnbTB3WuWXxnt55+JpSkshiGyKmBJ9biwh0a4h4ZqA+VfTLmbY+szaloWCx
+# 9ordICKOsJ1S+7SpXNImGxvR7mOcNCpxVcn6OYzfBr8aNR4y+iJN
 # SIG # End signature block
