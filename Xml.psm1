@@ -29,6 +29,8 @@
 #                Note: when using strings for xslt, make sure you single quote them or escape the $ signs.
 # Version    4.7 Fixed a typo in the namespace parameter of Select-Xml
 # Version    4.8 Fixed up some uses of Select-Xml -RemoveNamespace
+# Version    5.0 Added Update-Xml to allow setting xml attributes or node content
+
 
 $xlr8r = [psobject].assembly.gettype("System.Management.Automation.TypeAccelerators")
 $xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
@@ -44,8 +46,6 @@ if(!$xlr8r::Get["Dictionary"]) {
 if(!$xlr8r::Get["PSParser"]) {
    $xlr8r::Add( "PSParser", "System.Management.Automation.PSParser, System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35" )
 }
-
-
 
 filter Format-XML {
 #.Synopsis
@@ -103,47 +103,41 @@ function Select-Xml {
 #  However, only raw XmlNodes are returned from this function, so the output isn't currently compatible with the built in Select-Xml, but is equivalent to using Select-Xml ... | Select-Object -Expand Node
 #
 #  Also note that if the -RemoveNamespace switch is supplied the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
-#.Parameter Content
-#  Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
-#.Parameter Namespace
-#   Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
-#.Parameter Path
-#   Specifies the path and file names of the XML files to search.  Wildcards are permitted.
-#.Parameter Xml
-#  Specifies one or more XML nodes to search.
-#.Parameter XPath
-#  Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
-#.Parameter RemoveNamespace
-#  Allows the execution of XPath queries without namespace qualifiers. 
-#  
-#  If you specify the -RemoveNamespace switch, all namespace declarations and prefixes are actually removed from the Xml before the XPath search query is evaluated, and your XPath query should therefore NOT contain any namespace prefixes.
-# 
-#  Note that this means that the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
 [CmdletBinding(DefaultParameterSetName="Xml")]
 PARAM(
+    # Specifies the path and file names of the XML files to search.  Wildcards are permitted.
    [Parameter(Position=1,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
    [ValidateNotNullOrEmpty()]
    [Alias("PSPath")]
    [String[]]$Path
 ,
+    #  Specifies one or more XML nodes to search.
    [Parameter(Position=1,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
    [ValidateNotNullOrEmpty()]
    [Alias("Node")]
    [System.Xml.XmlNode[]]$Xml
 ,
+    #  Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
    [Parameter(ParameterSetName="Content",Mandatory=$true,ValueFromPipeline=$true)]
    [ValidateNotNullOrEmpty()]
    [String[]]$Content
 ,
+    #  Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
    [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$false)]
    [ValidateNotNullOrEmpty()]
    [Alias("Query")]
    [String[]]$XPath
 ,
+    #   Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
    [Parameter(Mandatory=$false)]
    [ValidateNotNullOrEmpty()]
    [Hashtable]$Namespace
 ,
+    #  Allows the execution of XPath queries without namespace qualifiers. 
+    #  
+    #  If you specify the -RemoveNamespace switch, all namespace declarations and prefixes are actually removed from the Xml before the XPath search query is evaluated, and your XPath query should therefore NOT contain any namespace prefixes.
+    # 
+    #  Note that this means that the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
    [Switch]$RemoveNamespace
 )
 BEGIN {
@@ -203,6 +197,102 @@ END {
 }
 Set-Alias slxml Select-Xml -EA 0
 
+function Update-Xml {
+#.Synopsis
+#  The Update-XML cmdlet lets you use XPath queries to replace text in nodes in XML documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
+#.Description
+#  Allows you to update an attribute value, xml node contents, etc.
+#
+#.Notes
+#  We still need to implement RemoveNode and RemoveAttribute and even ReplaceNode
+[CmdletBinding(DefaultParameterSetName="Xml")]
+param(
+    # Specifies the path and file names of the XML files to search.  Wildcards are permitted.
+   [Parameter(Position=5,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
+   [ValidateNotNullOrEmpty()]
+   [Alias("PSPath")]
+   [String[]]$Path
+,
+    #  Specifies one or more XML nodes to search.
+   [Parameter(Position=5,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+   [ValidateNotNullOrEmpty()]
+   [Alias("Node")]
+   [System.Xml.XmlNode[]]$Xml
+,
+    #  Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
+   [Parameter(ParameterSetName="Content",Mandatory=$true,ValueFromPipeline=$true)]
+   [ValidateNotNullOrEmpty()]
+   [String[]]$Content
+,
+    #  Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
+   [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$false)]
+   [ValidateNotNullOrEmpty()]
+   [Alias("Query")]
+   [String[]]$XPath
+,
+   #  The Attribute name (or "#text") for which the value is going to be replaced. Providing no value or an empty string results in replacing the InnerXml.
+   [Parameter(Position=1,Mandatory=$false,ValueFromPipeline=$false)]
+   [ValidateNotNullOrEmpty()]
+   [String[]]$Attribute
+,
+   #  The value toreplace in the specified Attribute name
+   [Parameter(Position=2,Mandatory=$true,ValueFromPipeline=$false)]
+   [ValidateNotNullOrEmpty()]
+   [String]$Value
+,
+   #   Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
+   [Parameter(Mandatory=$false)]
+   [ValidateNotNullOrEmpty()]
+   [Hashtable]$Namespace
+,
+    #  Allows the execution of XPath queries without namespace qualifiers. 
+    #  
+    #  If you specify the -RemoveNamespace switch, all namespace declarations and prefixes are actually removed from the Xml before the XPath search query is evaluated, and your XPath query should therefore NOT contain any namespace prefixes.
+    # 
+    #  Note that this means that the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
+   [Switch]$RemoveNamespace
+)
+   begin {
+      $null = $PSBoundParameters.Remove("Attribute")
+      $null = $PSBoundParameters.Remove("Value")
+      
+      $command = $ExecutionContext.InvokeCommand.GetCommand( "Select-Xml", [System.Management.Automation.CommandTypes]::Function )
+      $steppablePipeline = {& $command @PSBoundParameters | Write-Output }.GetSteppablePipeline($myInvocation.CommandOrigin)
+      $steppablePipeline.Begin($myInvocation.ExpectingInput)
+   }
+   process
+   {
+      Write-Verbose "Invoke-Autoloaded Process: $CommandName ($_)"
+      try {
+         foreach($node in $(if($_) { $steppablePipeline.Process($_) } else { $steppablePipeline.Process() })){
+            if($Attribute) {
+               $node.$Attribute = $Value
+            } else {
+               $node.Set_InnerXml($Value)
+            }
+         }
+      } catch {
+         throw
+      }
+   }
+
+   end
+   {
+      try {
+         foreach($node in $steppablePipeline.End()) {
+            if($Attribute) {
+               $node.$Attribute = $Value
+            } else {
+               $node.Set_InnerXml($Value)
+            }
+         }
+      } catch {
+         throw
+      }
+      Write-Verbose "Invoke-Autoloaded End: $CommandName"
+   }
+}
+
 function Convert-Node {
 #.Synopsis 
 # Convert a single XML Node via XSL stylesheets
@@ -248,7 +338,7 @@ PROCESS {
    Write-Output $output.ToString()
 }
 }
-   
+
 function Convert-Xml {
 #.Synopsis
 #  The Convert-XML function lets you use Xslt to transform XML strings and documents.
@@ -411,7 +501,77 @@ END {
 }
 Set-Alias rmns Remove-XmlNamespace -EA 0
 
+######## Helper functions for working with CliXml
 
+function ConvertFrom-CliXml {
+   param(
+      [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
+      [ValidateNotNullOrEmpty()]
+      [String[]]$InputObject
+   )
+   begin
+   {
+      $OFS = "`n"
+      [String]$xmlString = ""
+   }
+   process
+   {
+      $xmlString += $InputObject
+   }
+   end
+   {
+      $type = [type]::gettype("System.Management.Automation.Deserializer")
+      $ctor = $type.getconstructor("instance,nonpublic", $null, @([xml.xmlreader]), $null)
+      $sr = new-object System.IO.StringReader $xmlString
+      $xr = new-object System.Xml.XmlTextReader $sr
+      $deserializer = $ctor.invoke($xr)
+      $method = @($type.getmethods("nonpublic,instance") | where-object {$_.name -like "Deserialize"})[1]
+      $done = $type.getmethod("Done", [System.Reflection.BindingFlags]"nonpublic,instance")
+      while (!$done.invoke($deserializer, @()))
+      {
+         try {
+            $method.invoke($deserializer, "")
+         } catch {
+            write-warning "Could not deserialize $string: $_"
+         }
+      }
+      $xr.Close()
+      $sr.Dispose()
+   }
+}
+
+function ConvertTo-CliXml {
+   param(
+      [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
+      [ValidateNotNullOrEmpty()]
+      [PSObject[]]$InputObject
+   )
+   begin {
+      $type = [type]::gettype("System.Management.Automation.Serializer")
+      $ctor = $type.getconstructor("instance,nonpublic", $null, @([System.Xml.XmlWriter]), $null)
+      $sw = new-object System.IO.StringWriter
+      $xw = new-object System.Xml.XmlTextWriter $sw
+      $serializer = $ctor.invoke($xw)
+      $method = $type.getmethod("Serialize", "nonpublic,instance", $null, [type[]]@([object]), $null)
+      $done = $type.getmethod("Done", [System.Reflection.BindingFlags]"nonpublic,instance")
+   }
+   process {
+      try {
+         [void]$method.invoke($serializer, $InputObject)
+      } catch {
+         write-warning "Could not serialize $($InputObject.gettype()): $_"
+      }
+   }
+   end {    
+      [void]$done.invoke($serializer, @())
+      $sw.ToString()
+      $xw.Close()
+      $sw.Dispose()
+   }
+}
+
+
+######## From here down is all the code related to my XML DSL:
 
 function New-XDocument {
 #.Synopsis
@@ -680,75 +840,6 @@ Param([ScriptBlock]$script)
 }
 
 
-######## CliXml
-
-function ConvertFrom-CliXml {
-   param(
-      [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
-      [ValidateNotNullOrEmpty()]
-      [String[]]$InputObject
-   )
-   begin
-   {
-      $OFS = "`n"
-      [String]$xmlString = ""
-   }
-   process
-   {
-      $xmlString += $InputObject
-   }
-   end
-   {
-      $type = [type]::gettype("System.Management.Automation.Deserializer")
-      $ctor = $type.getconstructor("instance,nonpublic", $null, @([xml.xmlreader]), $null)
-      $sr = new-object System.IO.StringReader $xmlString
-      $xr = new-object System.Xml.XmlTextReader $sr
-      $deserializer = $ctor.invoke($xr)
-      $method = @($type.getmethods("nonpublic,instance") | where-object {$_.name -like "Deserialize"})[1]
-      $done = $type.getmethod("Done", [System.Reflection.BindingFlags]"nonpublic,instance")
-      while (!$done.invoke($deserializer, @()))
-      {
-         try {
-            $method.invoke($deserializer, "")
-         } catch {
-            write-warning "Could not deserialize $string: $_"
-         }
-      }
-      $xr.Close()
-      $sr.Dispose()
-   }
-}
-
-function ConvertTo-CliXml {
-   param(
-      [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
-      [ValidateNotNullOrEmpty()]
-      [PSObject[]]$InputObject
-   )
-   begin {
-      $type = [type]::gettype("System.Management.Automation.Serializer")
-      $ctor = $type.getconstructor("instance,nonpublic", $null, @([System.Xml.XmlWriter]), $null)
-      $sw = new-object System.IO.StringWriter
-      $xw = new-object System.Xml.XmlTextWriter $sw
-      $serializer = $ctor.invoke($xw)
-      $method = $type.getmethod("Serialize", "nonpublic,instance", $null, [type[]]@([object]), $null)
-      $done = $type.getmethod("Done", [System.Reflection.BindingFlags]"nonpublic,instance")
-   }
-   process {
-      try {
-         [void]$method.invoke($serializer, $InputObject)
-      } catch {
-         write-warning "Could not serialize $($InputObject.gettype()): $_"
-      }
-   }
-   end {    
-      [void]$done.invoke($serializer, @())
-      $sw.ToString()
-      $xw.Close()
-      $sw.Dispose()
-   }
-}
-
 
 ######## Xaml
 #  if($PSVersionTable.CLRVersion -ge "4.0"){
@@ -759,13 +850,13 @@ function ConvertTo-CliXml {
    #  }
 #  }
    
-Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Convert-Xml, Select-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml
+Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Convert-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml
 
 # SIG # Begin signature block
 # MIIRDAYJKoZIhvcNAQcCoIIQ/TCCEPkCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUlQ5L584Qz0SNfIkR1t7nIJfC
-# Friggg5CMIIHBjCCBO6gAwIBAgIBFTANBgkqhkiG9w0BAQUFADB9MQswCQYDVQQG
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU+W/LVKaLu6n+Wgl15WXeZ6ul
+# qS2ggg5CMIIHBjCCBO6gAwIBAgIBFTANBgkqhkiG9w0BAQUFADB9MQswCQYDVQQG
 # EwJJTDEWMBQGA1UEChMNU3RhcnRDb20gTHRkLjErMCkGA1UECxMiU2VjdXJlIERp
 # Z2l0YWwgQ2VydGlmaWNhdGUgU2lnbmluZzEpMCcGA1UEAxMgU3RhcnRDb20gQ2Vy
 # dGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMDcxMDI0MjIwMTQ1WhcNMTIxMDI0MjIw
@@ -846,11 +937,11 @@ Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XEleme
 # YXRlIFNpZ25pbmcxODA2BgNVBAMTL1N0YXJ0Q29tIENsYXNzIDIgUHJpbWFyeSBJ
 # bnRlcm1lZGlhdGUgT2JqZWN0IENBAgFRMAkGBSsOAwIaBQCgeDAYBgorBgEEAYI3
 # AgEMMQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisG
-# AQQBgjcCAQsxDjAMBgorBgEEAYI3AgEWMCMGCSqGSIb3DQEJBDEWBBTM4lHUVRUC
-# Gv/aYFU0KwQT41++izANBgkqhkiG9w0BAQEFAASCAQAhor+qcezuBnhODNs9y4vb
-# 3gP5gdOUAbPJWAaV82VNO0pQcqahwT/PyXl9UZIacmy5hQ8UVAIKK/+Y/r6Wcz2+
-# Pe/kh0cvD8n9PFU1UIHHj8ucyS7lzHrLzojulx2zy3Wtm8Lo4t8IrY8jNl1sSH+O
-# 8XP1Rgv+3CkIoERKkUpcPEWruj5kJyyHE+sRNQcZGlO9gjx8dzoUlLyxQXIF+fmW
-# ix2qQJ4UC6B1pjjv/Fv5KMuSDpgLOhLtzQeubmeqBGjeoumaPvYgvPsn6rYvBxWY
-# 9wdP8VCGVCIrEsUUyAuXoxzpFJk80PAX08bdvcOkQ7GQ13HEN4JBDtDTYHFV9M7v
+# AQQBgjcCAQsxDjAMBgorBgEEAYI3AgEWMCMGCSqGSIb3DQEJBDEWBBSg2DWYYgWq
+# 6pyxukc314L3m5t3ITANBgkqhkiG9w0BAQEFAASCAQCpGT09SsMDF6YhBqX8bBah
+# Y16E/29IvPFYmtpmrvvj4PkMS6rBO8vYWAhOwzUZntv56y2e0r9f6WwRHRvL20ya
+# Do6I2Rtv+wCJBjE3Mzjhb5WPO54a463ZaSHoE2KAPxlVHq1IN91OA1YMSbb3zy4p
+# xQGrNFHUe4Y4r3Buy8utnKkrJ9NR7deYXY30aowIYbRqaPlKKpiNkdqHvlNZjgVV
+# O0r8FEgk85KIhSNlwtMyiDffWi2OoQ9jADSSOQyvayqhGNpeg5GcDyWUC3DFqJgt
+# SzZ3wtECmjSUNABUornTKCHwNGOs67b3kkIz49sP273xQDaydYghe24JcDpmets7
 # SIG # End signature block
