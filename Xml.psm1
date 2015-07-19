@@ -18,6 +18,9 @@
 # Version    3.1 Fixed a really ugly bug in New-XDocument in 3.0 which I should not have released
 # Version    4.0 Never content to leave well enough alone, I've completely reworked New-XDocument
 # Version    4.1 Tweaked namespaces again so they don't cascade down when they shouldn't. Got rid of the unnecessary stack.
+# Version    4.2 Tightened xml: only cmdlet, function, and external scripts, with "-" in their names are exempted from being converted into xml tags.
+#                Fixed some alias error messages caused when PSCX is already loaded (we were failing to overwrite aliases for cvxml and fxml)
+#                Renamed the internal DSL function
 
 $xlr8r = [type]::gettype("System.Management.Automation.TypeAccelerators")
 $xlinq = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.5.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
@@ -40,20 +43,20 @@ function Format-XML {
 #.Synopsis
 #   Pretty-print formatted XML source
 #.Description
-#	Runs an XmlDocument through an auto-indenting XmlWriter
+#   Runs an XmlDocument through an auto-indenting XmlWriter
 #.Parameter Xml
-#	The Xml Document
+#   The Xml Document
 #.Parameter Indent
-#	The indent level (defaults to 2 spaces)
+#   The indent level (defaults to 2 spaces)
 Param(
-	[Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$true)]
-	[xml]$xml
+   [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$true)]
+   [xml]$xml
 ,
-	[Parameter(Mandatory=$false)]
-	$indent=2
+   [Parameter(Mandatory=$false)]
+   $indent=2
 )
     $StringWriter = New-Object System.IO.StringWriter
-    $XmlWriter = New-Object System.XMl.XmlTextWriter $StringWriter
+    $XmlWriter = New-Object System.Xml.XmlTextWriter $StringWriter
     $xmlWriter.Formatting = "indented"
     $xmlWriter.Indentation = $Indent
     $xml.WriteContentTo($XmlWriter)
@@ -61,7 +64,7 @@ Param(
     $StringWriter.Flush()
     Write-Output $StringWriter.ToString()
 }
-Set-Alias fxml Format-Xml
+Set-Alias fxml Format-Xml -EA 0
 
 function Select-Xml {
 #.Synopsis
@@ -126,7 +129,6 @@ BEGIN {
                $nsManager.AddNamespace( $ns.Key, $ns.Value )
             }
          }
-         
          foreach($path in $xpath) {
             $node.SelectNodes($path, $NamespaceManager)
    }  }  }  }
@@ -171,7 +173,7 @@ END {
 }
 
 }
-Set-Alias slxml Select-Xml
+Set-Alias slxml Select-Xml -EA 0
 
 function Convert-Node {
 #.Synopsis 
@@ -259,7 +261,7 @@ END {
    }
 }
 }
-Set-Alias cvxml Convert-Xml
+Set-Alias cvxml Convert-Xml -EA 0
 
 function Remove-XmlNamespace {
 #.Synopsis
@@ -345,39 +347,33 @@ END {
    }
 }
 }
-Set-Alias rmns Remove-XmlNamespace
+Set-Alias rmns Remove-XmlNamespace -EA 0
 
 
 
 function New-XDocument {
 #.Synopsis
-#	Creates a new XDocument (the new xml document type)
+#   Creates a new XDocument (the new xml document type)
 #.Description
 #  This is the root for a new XML mini-dsl, akin to New-BootsWindow for XAML
 #  It creates a new XDocument, and takes scritpblock(s) to define it's contents
 #.Parameter root
-#	The root node name
+#   The root node name
 #.Parameter version
-#	Optional: the XML version. Defaults to 1.0
+#   Optional: the XML version. Defaults to 1.0
 #.Parameter encoding
-#	Optional: the Encoding. Defaults to UTF-8
+#   Optional: the Encoding. Defaults to UTF-8
 #.Parameter standalone
 #  Optional: whether to specify standalone in the xml declaration. Defaults to "yes"
 #.Parameter args
-#	this is where all the dsl magic happens. Please see the Examples. :)
+#   this is where all the dsl magic happens. Please see the Examples. :)
 #
 #.Example
-# [XNamespace]$dc = "http`://purl.org/dc/elements/1.1"
-# [string]$xml = New-XDocument rss -dc $dc -version "2.0" {
+# [string]$xml = New-XDocument rss -version "2.0" {
 #    channel {
 #       title {"Test RSS Feed"}
 #       link {"http`://HuddledMasses.org"}
 #       description {"An RSS Feed generated simply to demonstrate my XML DSL"}
-#       dc:language {"en"}
-#       dc:creator {"Jaykul@HuddledMasses.org"}
-#       dc:rights {"Copyright 2009, CC-BY"}
-#       dc:date {(Get-Date -f u) -replace " ","T"}
-# 
 #       item {
 #          title {"The First Item"}
 #          link {"http`://huddledmasses.org/new-site-new-layout-lost-posts/"}
@@ -388,23 +384,15 @@ function New-XDocument {
 #    }
 # }
 #
-# $xml.Declaration.ToString()  ## I can't find a way to have this included in the $xml.ToString()
-# $xml.ToString()
-#
-#
-# OUTPUT: (NOTE: I added the space in the http: to paste it on PoshCode -- those aren't in the output)
-#
+# C:\PS>$xml.Declaration.ToString()  ## I can't find a way to have this included in the $xml.ToString()
+# C:\PS>$xml.ToString()
 #
 # <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-# <rss xmlns:dc="http ://purl.org/dc/elements/1.1" version="2.0">
+# <rss version="2.0">
 #   <channel>
 #     <title>Test RSS Feed</title>
 #     <link>http ://HuddledMasses.org</link>
 #     <description>An RSS Feed generated simply to demonstrate my XML DSL</description>
-#     <dc:language>en</dc:language>
-#     <dc:creator>Jaykul@HuddledMasses.org</dc:creator>
-#     <dc:rights>Copyright 2009, CC-BY</dc:rights>
-#     <dc:date>2009-07-26T00:50:08Z</dc:date>
 #     <item>
 #       <title>The First Item</title>
 #       <link>http ://huddledmasses.org/new-site-new-layout-lost-posts/</link>
@@ -415,42 +403,39 @@ function New-XDocument {
 #   </channel>
 # </rss>
 #
+#
+# Description
+# -----------
+# This example shows the creation of a complete RSS feed with a single item in it. 
+#
+# NOTE that the backtick in the http`: in the URLs in the input is unecessary, and I added the space after the http: in the URLs  in the output -- these are accomodations to PoshCode's spam filter. Backticks are not need in the input, and spaces do not appear in the actual output.
+#
+#
 #.Example 
-#  This time with a default namespace
-## IMPORTANT! ## NOTE that I use the "xe" shortcut which is redefined when you specify a namespace
-##            ## for the root element, so that all child elements (by default) inherit that.
-##            ## You can still control the prefixes by passing the namespace as a parameter
-##            ## e.g.: -atom $atom
-## The `: in the http`: is still only there for PoshCode, you can just use http: ...
-#
 # [XNamespace]$atom="http`://www.w3.org/2005/Atom"
-# [XNamespace]$dc = "http`://purl.org/dc/elements/1.1"
+# C:\PS>[XNamespace]$dc = "http`://purl.org/dc/elements/1.1"
 # 
-# New-XDocument ($atom + "feed") -Encoding "UTF-16" -$([XNamespace]::Xml +'lang') "en-US" -dc $dc {
-# 	title {"Test First Entry"}
-# 	link {"http`://HuddledMasses.org"}
-# 	updated {(Get-Date -f u) -replace " ","T"}
-# 	author {
-# 		name {"Joel Bennett"}
-# 		uri {"http`://HuddledMasses.org"}
-# 	}
-# 	id {"http`://huddledmasses.org/" }
-# 
-# 	entry {
+# C:\PS>New-XDocument ($atom + "feed") -Encoding "UTF-16" -$([XNamespace]::Xml +'lang') "en-US" -dc $dc {
+#    title {"Test First Entry"}
+#    link {"http`://HuddledMasses.org"}
+#    updated {(Get-Date -f u) -replace " ","T"}
+#    author {
+#       name {"Joel Bennett"}
+#       uri {"http`://HuddledMasses.org"}
+#    }
+#    id {"http`://huddledmasses.org/" }
+#
+#    entry {
 #       title {"Test First Entry"}
-# 		link {"http`://HuddledMasses.org/new-site-new-layout-lost-posts/" }
-# 		id {"http`://huddledmasses.org/new-site-new-layout-lost-posts/" }
-# 		updated {(Get-Date 10/31/2003 -f u) -replace " ","T"}
-# 		summary {"Ema Lazarus' Poem"}
-# 		link -rel license -href "http`://creativecommons.org/licenses/by/3.0/" -title "CC By-Attribution"
-# 		dc:rights { "Copyright 2009, Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)" }
+#       link {"http`://HuddledMasses.org/new-site-new-layout-lost-posts/" }
+#       id {"http`://huddledmasses.org/new-site-new-layout-lost-posts/" }
+#       updated {(Get-Date 10/31/2003 -f u) -replace " ","T"}
+#       summary {"Ema Lazarus' Poem"}
+#       link -rel license -href "http`://creativecommons.org/licenses/by/3.0/" -title "CC By-Attribution"
+#       dc:rights { "Copyright 2009, Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)" }
 #       category -scheme "http`://huddledmasses.org/tag/" -term "huddled-masses"
-# 	}
+#    }
 # } | % { $_.Declaration.ToString(); $_.ToString() }
-#
-#
-#  OUTPUT: (NOTE: I added the spaces again to the http: to paste it on PoshCode)
-#
 #
 # <?xml version="1.0" encoding="UTF-16" standalone="yes"?>
 # <feed xml:lang="en-US" xmlns="http ://www.w3.org/2005/Atom">
@@ -473,7 +458,13 @@ function New-XDocument {
 #     <category scheme="http ://huddledmasses.org/tag/" term="huddled-masses" />
 #   </entry>
 # </feed>
-# 
+#
+#
+# Description
+# -----------
+# This example shows the use of a default namespace, as well as additional specific namespaces for the "dc" namespace. It also demonstrates how you can get the <?xml?> declaration which does not appear in a simple .ToString().
+#
+# NOTE that the backtick in the http`: in the URLs in the input is unecessary, and I added the space after the http: in the URLs  in the output -- these are accomodations to PoshCode's spam filter. Backticks are not need in the input, and spaces do not appear in the actual output.#
 # 
 Param(
    [Parameter(Mandatory = $true, Position = 0)]
@@ -504,15 +495,14 @@ PROCESS {
          while($args) {
             $attrib, $value, $args = $args
             if($attrib -is [ScriptBlock]) {
-               Write-Verbose "Preparsed DSL: $attrib"
-               $attrib = DSL $attrib
+               # Write-Verbose "Preparsed DSL: $attrib"
+               $attrib = ConvertFrom-XmlDsl $attrib
                Write-Verbose "Reparsed DSL: $attrib"
                &$attrib
             } elseif ( $value -is [ScriptBlock] -and "-Content".StartsWith($attrib)) {
-               $value = DSL $value
+               $value = ConvertFrom-XmlDsl $value
                &$value
             } elseif ( $value -is [XNamespace]) {
-               Write-Host "Namespace: $value" -Fore Green
                New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-")), $value
                $script:NameSpaceHash.Add($attrib.TrimStart("-"), $value)
             } else {
@@ -523,34 +513,34 @@ PROCESS {
 }
 }
 
-Set-Alias xml New-XDocument
-Set-Alias New-Xml New-XDocument
+Set-Alias xml New-XDocument -EA 0
+Set-Alias New-Xml New-XDocument -EA 0
 
 function New-XAttribute {
 #.Synopsys
-#	Creates a new XAttribute (an xml attribute on an XElement for XDocument)
+#   Creates a new XAttribute (an xml attribute on an XElement for XDocument)
 #.Description
 #  This is the work-horse for the XML mini-dsl
 #.Parameter name
-#	The attribute name
+#   The attribute name
 #.Parameter value
 #  The attribute value
 Param([Parameter(Mandatory=$true)]$name,[Parameter(Mandatory=$true)]$value)
    New-Object XAttribute $name, $value
 }
-Set-Alias xa New-XAttribute
-Set-Alias New-XmlAttribute New-XAttribute
+Set-Alias xa New-XAttribute -EA 0
+Set-Alias New-XmlAttribute New-XAttribute -EA 0
 
 
 function New-XElement {
 #.Synopsys
-#	Creates a new XElement (an xml tag for XDocument)
+#   Creates a new XElement (an xml tag for XDocument)
 #.Description
 #  This is the work-horse for the XML mini-dsl
 #.Parameter tag
-#	The name of the xml tag
+#   The name of the xml tag
 #.Parameter args
-#	this is where all the dsl magic happens. Please see the Examples. :)
+#   this is where all the dsl magic happens. Please see the Examples. :)
 Param(
    [Parameter(Mandatory = $true, Position = 0)]
    [System.Xml.Linq.XName]$tag
@@ -559,16 +549,16 @@ Param(
    [PSObject[]]$args
 )
 #  BEGIN {
-	#  if([string]::IsNullOrEmpty( $tag.NamespaceName )) {
-		#  $tag = $($script:NameSpaceStack.Peek()) + $tag
+   #  if([string]::IsNullOrEmpty( $tag.NamespaceName )) {
+      #  $tag = $($script:NameSpaceStack.Peek()) + $tag
       #  if( $script:NameSpaceStack.Count -gt 0 ) {
          #  $script:NameSpaceStack.Push( $script:NameSpaceStack.Peek() )
       #  } else {
          #  $script:NameSpaceStack.Push( $null )
       #  }      
-	#  } else {
+   #  } else {
       #  $script:NameSpaceStack.Push( $tag.Namespace )
-	#  }
+   #  }
 #  }
 PROCESS {
   New-Object XElement $(
@@ -595,12 +585,11 @@ PROCESS {
 Set-Alias xe New-XElement
 Set-Alias New-XmlElement New-XElement
 
-
-function DSL {
+function ConvertFrom-XmlDsl {
 Param([ScriptBlock]$script)
    $parserrors = $null
    $global:tokens = [PSParser]::Tokenize( $script, [ref]$parserrors )
-   $duds = $global:tokens | Where-Object { $_.Type -eq "Command" -and ($(Get-Command $_.Content -EA 0) -eq $Null) }
+   $duds = $global:tokens | Where-Object { $_.Type -eq "Command" -and !$_.Content.Contains('-') -and ($(Get-Command $_.Content -Type Cmdlet,Function,ExternalScript -EA 0) -eq $Null) }
    [Array]::Reverse( $duds )
    
    [string[]]$ScriptText = "$script" -split "`n"
@@ -619,5 +608,4 @@ Param([ScriptBlock]$script)
    Write-Output ([ScriptBlock]::Create( ($ScriptText -join "`n") ))
 }
    
-
 Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Convert-Xml, Select-Xml, Format-Xml
