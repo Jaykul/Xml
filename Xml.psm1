@@ -261,291 +261,365 @@ function Format-Xml {
         Write-Output $StringWriter.ToString()
     }
 }
+
 Set-Alias fxml Format-Xml -EA 0
 Set-Alias fx   Format-Xml -EA 0
 
-function Select-XmlNodeInternal {
-[CmdletBinding()]
-param([Xml.XmlNode[]]$Xml, [String[]]$XPath, [Hashtable]$NamespaceManager)
-begin {
-    Write-Verbose "XPath = $($XPath -join ',')"
-    foreach($node in $xml) {
-        if($NamespaceManager) {
-            $nsManager = new-object System.Xml.XmlNamespaceManager $node.NameTable
-            foreach($ns in $NamespaceManager.GetEnumerator()) {
-                $nsManager.AddNamespace( $ns.Key, $ns.Value )
+function SelectXmlNode {
+    [CmdletBinding()]
+    param(
+        [Xml.XmlNode[]]$Xml,
+        [String[]]$XPath,
+        [Hashtable]$NamespaceManager
+    )
+    begin {
+        Write-Verbose "XPath = $($XPath -join ',')"
+        foreach($node in $xml) {
+            if($NamespaceManager) {
+                $nsManager = new-object System.Xml.XmlNamespaceManager $node.NameTable
+                foreach($ns in $NamespaceManager.GetEnumerator()) {
+                    $nsManager.AddNamespace( $ns.Key, $ns.Value )
+                }
+                Write-Verbose "Names = $($nsManager | % { @{ $_ = $nsManager.LookupNamespace($_) } } | Out-String)"
             }
-            Write-Verbose "Names = $($nsManager | % { @{ $_ = $nsManager.LookupNamespace($_) } } | Out-String)"
+            foreach($path in $xpath) {
+                $node.SelectNodes($path, $nsManager)
+            }
         }
-        foreach($path in $xpath) {
-            $node.SelectNodes($path, $nsManager)
-        }
-    }
-}}
-
-function Select-Xml {
-#.Synopsis
-#  The Select-XML cmdlet lets you use XPath queries to search for text in XML strings and documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
-#.Description
-#  Improves over the built-in Select-XML by leveraging Remove-XmlNamespace to provide a -RemoveNamespace parameter -- if it's supplied, all of the namespace declarations and prefixes are removed from all XML nodes (by an XSL transform) before searching.  
-#  
-#  However, only raw XmlNodes are returned from this function, so the output isn't currently compatible with the built in Select-Xml, but is equivalent to using Select-Xml ... | Select-Object -Expand Node
-#
-#  Also note that if the -RemoveNamespace switch is supplied the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
-[CmdletBinding(DefaultParameterSetName="Xml")]
-param(
-    # Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
-    [Parameter(Position=1,Mandatory=$true,ValueFromPipeline=$false)]
-    [ValidateNotNullOrEmpty()]
-    [Alias("Query")]
-    [String[]]$XPath
-,
-    # Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
-    [Parameter(ParameterSetName="Content",Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    [String[]]$Content
-,
-    # Specifies the path and file names of the XML files to search.  Wildcards are permitted.
-    [Parameter(Position=5,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
-    [ValidateNotNullOrEmpty()]
-    [Alias("PSPath")]
-    [String[]]$Path
-,
-    # Specifies one or more XML nodes to search.
-    [Parameter(Position=5,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
-    [ValidateNotNullOrEmpty()]
-    [Alias("Node")]
-    [System.Xml.XmlNode[]]$Xml
-,
-    # Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
-    [Parameter(Position=10,Mandatory=$false)]
-    [ValidateNotNullOrEmpty()]
-    [Alias("Ns")]
-    [Hashtable]$Namespace
-,
-    # Allows the execution of XPath queries without namespace qualifiers. 
-    # 
-    # If you specify the -RemoveNamespace switch, all namespace declarations and prefixes are actually removed from the Xml before the XPath search query is evaluated, and your XPath query should therefore NOT contain any namespace prefixes.
-    # 
-    # Note that this means that the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
-    [Alias("Rn","Rm")]
-    [Switch]$RemoveNamespace
-)
-begin {
-    $NSM = $Null; if($PSBoundParameters.ContainsKey("Namespace")) { $NSM = $Namespace }
-    $XmlNodes = New-Object System.Xml.XmlNode[] 1
-    if($PSCmdlet.ParameterSetName -eq "Content") {
-        $XmlNodes = Get-XmlContent $Content -RemoveNamespace:$RemoveNamespace
-        Select-XmlNodeInternal $XmlNodes $XPath $NSM
     }
 }
-process {
-    switch($PSCmdlet.ParameterSetName) {
-        "Path" {
-            $node = Get-XmlContent $Path -RemoveNamespace:$RemoveNamespace
-            Select-XmlNodeInternal $node $XPath $NSM
+
+function Select-Xml {
+    #.Synopsis
+    #  The Select-XML cmdlet lets you use XPath queries to search for text in XML strings and documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
+    #.Description
+    #  Improves over the built-in Select-XML by leveraging Remove-XmlNamespace to provide a -RemoveNamespace parameter -- if it's supplied, all of the namespace declarations and prefixes are removed from all XML nodes (by an XSL transform) before searching.
+    #
+    #  However, only raw XmlNodes are returned from this function, so the output isn't currently compatible with the built in Select-Xml, but is equivalent to using Select-Xml ... | Select-Object -Expand Node
+    #
+    #  Also note that if the -RemoveNamespace switch is supplied the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
+    [CmdletBinding(DefaultParameterSetName="Xml")]
+    param(
+        # Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
+        [Parameter(Position=1,Mandatory=$true,ValueFromPipeline=$false)]
+        [ValidateNotNullOrEmpty()]
+        [Alias("Query")]
+        [String[]]$XPath,
+
+        # Specifies a string that contains the XML to search. You can also pipe strings to Select-XML.
+        [Parameter(ParameterSetName="Content",Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [String[]]$Content,
+
+        # Specifies the path and file names of the XML files to search.  Wildcards are permitted.
+        [Parameter(Position=5,ParameterSetName="Path",Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
+        [ValidateNotNullOrEmpty()]
+        [Alias("PSPath")]
+        [String[]]$Path,
+
+        # Specifies one or more XML nodes to search.
+        [Parameter(Position=5,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [ValidateNotNullOrEmpty()]
+        [Alias("Node")]
+        [System.Xml.XmlNode[]]$Xml,
+
+        # Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
+        [Parameter(Position=10,Mandatory=$false)]
+        [ValidateNotNullOrEmpty()]
+        [Alias("Ns")]
+        [Hashtable]$Namespace,
+
+        # Allows the execution of XPath queries without namespace qualifiers.
+        #
+        # If you specify the -RemoveNamespace switch, all namespace declarations and prefixes are actually removed from the Xml before the XPath search query is evaluated, and your XPath query should therefore NOT contain any namespace prefixes.
+        #
+        # Note that this means that the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
+        [Alias("Rn","Rm")]
+        [Switch]$RemoveNamespace
+    )
+    begin {
+        $NSM = $Null; if($PSBoundParameters.ContainsKey("Namespace")) { $NSM = $Namespace }
+        $XmlNodes = New-Object System.Xml.XmlNode[] 1
+        if($PSCmdlet.ParameterSetName -eq "Content") {
+            $XmlNodes = Get-XmlContent $Content -RemoveNamespace:$RemoveNamespace
+            SelectXmlNode $XmlNodes $XPath $NSM
         }
-        "Xml" {
-            foreach($node in $Xml) {
-                if($RemoveNamespace) {
-                   [Xml]$node = Remove-XmlNamespace -Xml $node
+    }
+    process {
+        switch($PSCmdlet.ParameterSetName) {
+            "Path" {
+                $node = Get-XmlContent $Path -RemoveNamespace:$RemoveNamespace
+                SelectXmlNode $node $XPath $NSM
+            }
+            "Xml" {
+                foreach($node in $Xml) {
+                    if($RemoveNamespace) {
+                       [Xml]$node = Remove-XmlNamespace -Xml $node
+                    }
+                    SelectXmlNode $node $XPath $NSM
                 }
-                Select-XmlNodeInternal $node $XPath $NSM
             }
         }
     }
-}}
+}
 Set-Alias slxml Select-Xml -EA 0
 Set-Alias slx Select-Xml -EA 0
 
 
 function Update-Xml {
-#.Synopsis
-#  The Update-XML cmdlet lets you use XPath queries to replace text in nodes in XML documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
-#.Description
-#  Allows you to update an attribute value, xml node contents, etc.
-#
-#.Notes
-#  We still need to implement RemoveNode and RemoveAttribute and even ReplaceNode
-[CmdletBinding(DefaultParameterSetName="Set")]
-param(
-    # Specifies an XPath for an element where you want to insert the new node.
-    [Parameter(ParameterSetName="Before",Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    [Switch]$Before
-,
-    # Specifies an XPath for an element where you want to insert the new node.
-    [Parameter(ParameterSetName="After",Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    [Switch]$After
-,
-    # If set, the new value will be added as a new child of the node identified by the XPath
-    [Parameter(ParameterSetName="Append",Mandatory=$true)]
-    [Switch]$Append
-,
-    # If set, the node identified by the XPath will be removed instead of set
-    [Parameter(ParameterSetName="Remove",Mandatory=$true)]
-    [Switch]$Remove
-,
-    # If set, the node identified by the XPath will be Replace instead of set
-    [Parameter(ParameterSetName="Replace",Mandatory=$true)]
-    [Switch]$Replace
-,
-    # Specifies an XPath for the node to update. This could be an element node *or* an attribute node (remember: //element/@attribute )
-    [Parameter(Position=1,Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    [String[]]$XPath
-,
-    # The new value to place in the xml
-    [Parameter(Position=2,Mandatory=$true,ValueFromPipeline=$false)]
-    [ValidateNotNullOrEmpty()]
-    [String]$Value
-,
-    # Specifies one or more XML nodes to search.
-    [Parameter(Position=5,Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
-    [ValidateNotNullOrEmpty()]
-    [Alias("Node")]
-    [System.Xml.XmlNode[]]$Xml
-,   
-    # Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
-    [Parameter(Position=10,Mandatory=$false)]
-    [ValidateNotNullOrEmpty()]
-    [Alias("Ns")]
-    [Hashtable]$Namespace
-,   
-    # Output the XML documents after adding updating them
-    [Switch]$Passthru
-)
-process
-{
-    foreach($XmlNode in $Xml) {
-        $select = @{}
-        $select.Xml = $XmlNode
-        $select.XPath = $XPath
-        if($Namespace) {  
-            $select.Namespace = $Namespace
-        }
-        $document =
-            if($XmlNode -is [System.Xml.XmlDocument]) {
-                $XmlNode
-            } else { 
-                $XmlNode.get_OwnerDocument()
-            }
-        if($xValue = $Value -as [Xml]) {
-            $xValue = $document.ImportNode($xValue.SelectSingleNode("/*"), $true)
-        }
-        $nodes = Select-Xml @Select | Where-Object { $_ }
+    #.Synopsis
+    #  The Update-XML cmdlet lets you use XPath queries to replace text in nodes in XML documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
+    #.Description
+    #  Allows you to update an attribute value, xml node contents, etc.
+    #
+    #.Notes
+    #  We still need to implement RemoveNode and RemoveAttribute and even ReplaceNode
+    [CmdletBinding(DefaultParameterSetName="Set")]
+    param(
+        # Specifies an XPath for an element where you want to insert the new node.
+        [Parameter(ParameterSetName="Before",Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [Switch]$Before,
 
-        if(@($nodes).Count -eq 0) { Write-Warning "No nodes matched your XPath, nothing will be updated" }
-        
-        foreach($node in $nodes) {
-            $select.XPath = "$XPath/parent::*"
-            $parent = Select-Xml @Select
-            if(!$xValue) {
-                if($node -is [System.Xml.XmlAttribute] -and $Value.Contains("=")) {
-                    $aName, $aValue = $Value.Split("=",2)
-                    if($aName.Contains(":")){
-                        $ns,$name = $aName.Split(":",2)
-                        $xValue = $document.CreateAttribute( $name, $Namespace[$ns] )
-                    } else {
-                        $xValue = $document.CreateAttribute( $aName )
-                    }
-                    $xValue.Value = $aValue
+        # Specifies an XPath for an element where you want to insert the new node.
+        [Parameter(ParameterSetName="After",Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [Switch]$After,
+
+        # If set, the new value will be added as a new child of the node identified by the XPath
+        [Parameter(ParameterSetName="Append",Mandatory=$true)]
+        [Switch]$Append,
+
+        # If set, the node identified by the XPath will be removed instead of set
+        [Parameter(ParameterSetName="Remove",Mandatory=$true)]
+        [Switch]$Remove,
+
+        # If set, the node identified by the XPath will be Replace instead of set
+        [Parameter(ParameterSetName="Replace",Mandatory=$true)]
+        [Switch]$Replace,
+
+        # Specifies an XPath for the node to update. This could be an element node *or* an attribute node (remember: //element/@attribute )
+        [Parameter(Position=1,Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [String[]]$XPath,
+
+        # The new value to place in the xml
+        [Parameter(ParameterSetName="Before", Position=2,Mandatory=$true,ValueFromPipeline=$false)]
+        [Parameter(ParameterSetName="After", Position=2,Mandatory=$true,ValueFromPipeline=$false)]
+        [Parameter(ParameterSetName="Append", Position=2,Mandatory=$true,ValueFromPipeline=$false)]
+        [Parameter(ParameterSetName="Replace", Position=2,Mandatory=$true,ValueFromPipeline=$false)]
+        [Parameter(ParameterSetName="Set", Position=2,Mandatory=$true,ValueFromPipeline=$false)]
+        [ValidateNotNullOrEmpty()]
+        [String]$Value,
+
+        # Specifies one or more XML nodes to search.
+        [Parameter(Position=5,Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [ValidateNotNullOrEmpty()]
+        [Alias("Node")]
+        [System.Xml.XmlNode[]]$Xml,
+
+        # Specifies a hash table of the namespaces used in the XML. Use the format @{<namespaceName> = <namespaceUri>}.
+        [Parameter(Position=10,Mandatory=$false)]
+        [ValidateNotNullOrEmpty()]
+        [Alias("Ns")]
+        [Hashtable]$Namespace,
+
+        # Output the XML documents after adding updating them
+        [Switch]$Passthru
+    )
+    process {
+        foreach($XmlNode in $Xml) {
+            $select = @{}
+            $select.Xml = $XmlNode
+            $select.XPath = $XPath
+            if($Namespace) {
+                $select.Namespace = $Namespace
+            }
+            $document =
+                if($XmlNode -is [System.Xml.XmlDocument]) {
+                    $XmlNode
+                } else {
+                    $XmlNode.get_OwnerDocument()
+                }
+            if($PSCmdlet.ParameterSetName -ne "Remove") {
+                if($xValue = $Value -as [Xml]) {
+                    $xValue = $document.ImportNode($xValue.SelectSingleNode("/*"), $true)
                 }
             }
-            
-            switch($PSCmdlet.ParameterSetName) {
-                "Before" {
-                    $null = $parent.InsertBefore( $xValue, $node )
-                }
-                "After" {
-                    $null = $parent.InsertAfter( $xValue, $node )
-                }
-                "Append" {
-                    $null = $parent.AppendChild( $xValue )
-                }
-                "Remove" {
-                    $null = $parent.RemoveChild( $node )
-                }
-                "Replace" {
-                    if(!$xValue) {
-                        $xValue = $document.CreateTextNode( $Value )
-                    }
-                    $null = $parent.ReplaceChild( $xValue, $node )
-                }
-                "Set" {
-                    if(!$xValue -and $node."#text") {
-                        $node."#text" = $Value
-                    } else {
-                        if($node -is [System.Xml.XmlElement]) {
-                            if(!$xValue) {
-                                $xValue = $document.CreateTextNode( $Value )
-                            }
-                            $null = $node.set_innerXml("")
-                            $null = $node.AppendChild($xValue)
-                        }
-                        elseif($node -is [System.Xml.XmlAttribute]) {
-                            $node.Value = $Value
+            $nodes = Select-Xml @Select | Where-Object { $_ }
+
+            if(@($nodes).Count -eq 0) { Write-Warning "No nodes matched your XPath, nothing will be updated" }
+
+            foreach($node in $nodes) {
+                $select.XPath = "$XPath/parent::*"
+                $parent = Select-Xml @Select
+                if(!$xValue) {
+                    if($node -is [System.Xml.XmlAttribute] -and $Value.Contains("=")) {
+                        $aName, $aValue = $Value.Split("=",2)
+                        if($aName.Contains(":")){
+                            $ns,$name = $aName.Split(":",2)
+                            $xValue = $document.CreateAttribute( $name, $Namespace[$ns] )
                         } else {
-                            Write-Warning "$XPath selects a node of type $($node.GetType()), which we haven't handled. Please add that handler!"
+                            $xValue = $document.CreateAttribute( $aName )
+                        }
+                        $xValue.Value = $aValue
+                    }
+                }
+
+                switch($PSCmdlet.ParameterSetName) {
+                    "Before" {
+                        $null = $parent.InsertBefore( $xValue, $node )
+                    }
+                    "After" {
+                        $null = $parent.InsertAfter( $xValue, $node )
+                    }
+                    "Append" {
+                        $null = $parent.AppendChild( $xValue )
+                    }
+                    "Remove" {
+                        $null = $parent.RemoveChild( $node )
+                    }
+                    "Replace" {
+                        if(!$xValue) {
+                            $xValue = $document.CreateTextNode( $Value )
+                        }
+                        $null = $parent.ReplaceChild( $xValue, $node )
+                    }
+                    "Set" {
+                        if(!$xValue -and $node."#text") {
+                            $node."#text" = $Value
+                        } else {
+                            if($node -is [System.Xml.XmlElement]) {
+                                if(!$xValue) {
+                                    $xValue = $document.CreateTextNode( $Value )
+                                }
+                                $null = $node.set_innerXml("")
+                                $null = $node.AppendChild($xValue)
+                            }
+                            elseif($node -is [System.Xml.XmlAttribute]) {
+                                $node.Value = $Value
+                            } else {
+                                Write-Warning "$XPath selects a node of type $($node.GetType()), which we haven't handled. Please add that handler!"
+                            }
                         }
                     }
                 }
             }
-        }
-        if($Passthru) {
-            Write-Output $XmlNode
+            if($Passthru) {
+                Write-Output $XmlNode
+            }
         }
     }
-}}
+}
 Set-Alias uxml Update-Xml -EA 0
 Set-Alias ux Update-Xml -EA 0
 
 function Convert-Node {
-#.Synopsis 
-# Convert a single XML Node via XSL stylesheets
-[CmdletBinding(DefaultParameterSetName="Reader")]
-param(
-   [Parameter(ParameterSetName="ByNode",Mandatory=$true,ValueFromPipeline=$true)]
-   [System.Xml.XmlNode]$Node
-,
-   [Parameter(ParameterSetName="Reader",Mandatory=$true,ValueFromPipeline=$true)]
-   [System.Xml.XmlReader]$XmlReader
-,
-   [Parameter(Position=1,Mandatory=$true,ValueFromPipeline=$false)]
-   [System.Xml.Xsl.XslCompiledTransform]$StyleSheet
-,
-   [Parameter(Position=2,Mandatory=$false)]
-   [Alias("Parameters")]
-   [hashtable]$Arguments
-)
-PROCESS {
-   if($PSCmdlet.ParameterSetName -eq "ByNode") {
-      $XmlReader = New-Object Xml.XmlNodeReader $node
-   }
+    #.Synopsis
+    # Convert a single XML Node via XSL stylesheets
+    [CmdletBinding(DefaultParameterSetName="Reader")]
+    param(
+       [Parameter(ParameterSetName="ByNode",Mandatory=$true,ValueFromPipeline=$true)]
+       [System.Xml.XmlNode]$Node,
 
-   $output = New-Object IO.StringWriter
-   $argList = $null
-   
-   if($Arguments) {
-      $argList = New-Object System.Xml.Xsl.XsltArgumentList
-      foreach($arg in $Arguments.GetEnumerator()) {
-         $namespace, $name = $arg.Key -split ":"
-         ## Fix namespace
-         if(!$name) { 
-            $name = $Namespace
-            $namespace = ""
-         }
-         
-         Write-Verbose "ns:$namespace name:$name value:$($arg.Value)"
-         $argList.AddParam($name,"$namespace",$arg.Value)
-      }
-   }
-   
-   $StyleSheet.Transform( $XmlReader, $argList, $output )
-   Write-Output $output.ToString()
+       [Parameter(ParameterSetName="Reader",Mandatory=$true,ValueFromPipeline=$true)]
+       [System.Xml.XmlReader]$XmlReader,
+
+       [Parameter(Position=1,Mandatory=$true,ValueFromPipeline=$false)]
+       [System.Xml.Xsl.XslCompiledTransform]$StyleSheet,
+
+       [Parameter(Position=2,Mandatory=$false)]
+       [Alias("Parameters")]
+       [hashtable]$Arguments
+    )
+    process {
+        if($PSCmdlet.ParameterSetName -eq "ByNode") {
+            $XmlReader = New-Object Xml.XmlNodeReader $node
+        }
+
+        $output = New-Object IO.StringWriter
+        $argList = $null
+
+        if($Arguments) {
+            $argList = New-Object System.Xml.Xsl.XsltArgumentList
+            foreach($arg in $Arguments.GetEnumerator()) {
+                $namespace, $name = $arg.Key -split ":"
+                ## Fix namespace
+                if(!$name) {
+                    $name = $Namespace
+                    $namespace = ""
+                }
+
+                Write-Verbose "ns:$namespace name:$name value:$($arg.Value)"
+                $argList.AddParam($name,"$namespace",$arg.Value)
+            }
+        }
+
+        $StyleSheet.Transform( $XmlReader, $argList, $output )
+        Write-Output $output.ToString()
+    }
 }
+
+
+Add-Type -Path "$PSScriptRoot\SgmlReader.dll"
+function Import-Html {
+    #.Synopsis
+    #   Load an HTML file to an XML Document
+    [CmdletBinding()]
+    param(
+        # The path to the HTML File
+        [String]$Path
+    )
+
+    $sgml = New-Object Sgml.SgmlReader
+    $sgml.DocType = "HTML"
+    $sgml.WhitespaceHandling = "All"
+    $sgml.CaseFolding = "ToLower"
+    $sgml.IgnoreDtd = $False
+    $stream = New-Object IO.StreamReader $Path
+    $sgml.InputStream = $stream
+
+    $xml = New-Object Xml.XmlDocument
+    $xml.PreserveWhitespace = $true
+    $xml.XmlResolver = $null
+    $xml.Load($sgml)
+
+    $stream.Close()
+    $sgml.Close()
+
+    return $xml
 }
+
+function ConvertFrom-Html {
+    #.Synopsis
+    #   Load HTML text As an XML Document
+    [CmdletBinding()]
+    param(
+        # The HTML content
+        [String]$Html
+    )
+
+    $sgml = New-Object Sgml.SgmlReader
+    $sgml.DocType = "HTML"
+    $sgml.WhitespaceHandling = "All"
+    $sgml.CaseFolding = "ToLower"
+    $sgml.IgnoreDtd = $False
+    $stream = New-Object IO.StringReader $Html
+    $sgml.InputStream = $stream
+
+    $xml = New-Object Xml.XmlDocument
+    $xml.PreserveWhitespace = $true
+    $xml.XmlResolver = $null
+    $xml.Load($sgml)
+
+    $stream.Close()
+    $sgml.Close()
+
+    return $xml
+}
+
+
+
 
 function Convert-Xml {
 #.Synopsis
