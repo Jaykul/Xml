@@ -47,7 +47,10 @@
 #                Reformat and clean up to (mostly) match the new best practices stuff
 #                Push to github
 #                Run the PSScriptAnalyzer
-# Version    6.8 Idempotent ConvertFrom-XmlDsl. New-XDocument -Content changed, -DSL added.
+# Version    6.8 Facilitate reuse of ConvertFrom-XmlDsl output
+#                Add Add-XNamespace
+#                Change ConvertFrom-XmlDsl exported, idempotent, accepts namespace arguments
+#                Added -BlockType param to New-XDocument (default: XmlDsl), New-XElement (default: Script); defaults set for backwards compatibility
 
 
 # FOR PowerShell 5, we should be able to use using statements...
@@ -1039,15 +1042,18 @@ function New-XDocument {
         [Parameter(Mandatory = $false)]
         [hashtable]$Parameters,
         
+        # Allow bypassing ConvertFrom-XmlDsl
+        [ValidateSet("XmlDsl","Script")]
+        [string]$BlockType="XmlDsl",
+        
         # this is where all the dsl magic happens. Please see the Examples. :)
         [AllowNull()][AllowEmptyString()][AllowEmptyCollection()]
         [Parameter(Position=99, Mandatory = $false, ValueFromRemainingArguments=$true)]
         [PSObject[]]$args
     )
     begin {
-        $script:NameSpaceHash = New-Object 'Dictionary[String,XNamespace]'
         if($root.NamespaceName) {
-            $script:NameSpaceHash.Add("", $root.Namespace)
+            Add-XNamespace -prefix "" -namespace $root.Namespace
         }
     }
     process {
@@ -1057,32 +1063,7 @@ function New-XDocument {
             }
         }
         New-Object XDocument (New-Object XDeclaration $Version, $Encoding, $standalone), (
-            New-Object XElement $(
-                $root
-                while($args) {
-                    $attrib, $value, $args = $args
-                    if($attrib -is [ScriptBlock]) {
-                        # Write-Verbose "Preparsed DSL: $attrib"
-                        $attrib = ConvertFrom-XmlDsl $attrib
-                        Write-Verbose "Reparsed DSL: $attrib"
-                        & $attrib
-            } elseif ( $value -is [ScriptBlock] -and "-DSL".StartsWith($attrib.TrimEnd(':').ToUpper())) {
-               $value = ConvertFrom-XmlDsl $value
-               Write-Verbose "Reparsed DSL: $value"
-               & $value
-                    } elseif ( $value -is [ScriptBlock] -and "-CONTENT".StartsWith($attrib.TrimEnd(':').ToUpper())) {
-                        $value = ConvertFrom-XmlDsl $value
-                        Write-Verbose "Reparsed DSL: $value"
-                        & $value
-                    } elseif ( $value -is [XNamespace]) {
-                        New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-").TrimEnd(':')), $value
-                        $script:NameSpaceHash.Add($attrib.TrimStart("-").TrimEnd(':'), $value)
-                    } else {
-                        Write-Verbose "XAttribute $attrib = $value"
-                        New-Object XAttribute $attrib.TrimStart("-").TrimEnd(':'), $value
-                    }
-                }
-            )
+            New-XElement -tag $root -BlockType:$BlockType @args
         )
     }
 }
@@ -1123,7 +1104,11 @@ function New-XElement {
     param(
         [Parameter(Mandatory = $true, Position = 0)]
         [XName]$tag,
-   
+
+        # Conditional ConvertFrom-XmlDsl
+        [ValidateSet("XmlDsl","Script")]
+        [string]$BlockType="Script",
+
         [AllowNull()][AllowEmptyString()][AllowEmptyCollection()]
         [Parameter(Position=99, Mandatory = $false, ValueFromRemainingArguments=$true)]
         [PSObject[]]$args
@@ -1134,14 +1119,18 @@ function New-XElement {
             Write-Verbose "New-XElement $tag $($args -join ',')"
             while($args) {
                 $attrib, $value, $args = $args
-                if($attrib -is [ScriptBlock]) { # then it's content
-                    & $attrib
-                } elseif ( $value -is [ScriptBlock] -and "-CONTENT".StartsWith($attrib.TrimEnd(':').ToUpper())) { # then it's content
+                if($attrib -is [ScriptBlock] -or ($value -is [ScriptBlock] -and "-CONTENT".StartsWith($attrib.TrimEnd(':').ToUpper()))) { # then it's content
+                    if($attrib -is [ScriptBlock]) {
+                        $value = $attrib # miniscule performance hit for convenience of excluding "-Content"
+                    }
+                    if ($BlockType -eq "XmlDsl") {
+                        $value = ConvertFrom-XmlDsl $value
+                    }
                     & $value
                 } elseif ( $value -is [XNamespace]) {
                     Write-Verbose "New XAttribute xmlns: $($attrib.TrimStart("-").TrimEnd(':')) = $value"
                     New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-").TrimEnd(':')), $value
-                    $script:NameSpaceHash.Add($attrib.TrimStart("-").TrimEnd(':'), $value)
+                    Add-XNameSpace -prefix $attrib.TrimStart("-").TrimEnd(':') -namespace $value
                 } elseif($value -match "^-(?!\d)\w") {
                     $args = @($value)+@($args)
                 } elseif($null -ne $value) {
@@ -1155,9 +1144,43 @@ function New-XElement {
 Set-Alias xe New-XElement
 Set-Alias New-XmlElement New-XElement
 
-function ConvertFrom-XmlDsl {
-    param([ScriptBlock]$script)
+function Add-XNamespace {
+    param(
+        [Parameter(Mandatory=$true)]$prefix,
+        [Parameter(Mandatory=$true)]$namespace
+    )
+    if ($null =eq $script:NameSpaceHash) {
+       $script:NameSpaceHash = New-Object 'Dictionary[String,XNamespace]'
+    }
+    if ($script:NameSpaceHash.ContainsKey($prefix)) {
+        if ($script:NameSpaceHash[$prefix] -ne $namespace) {
+            Write-Error "Namespace collision: $prefix already defined as $($script:NameSpaceHash[$prefix])"
+        }
+    } else {
+        $script:NameSpaceHash.Add($prefix, $namespace)
+    }
+}
 
+function ConvertFrom-XmlDsl {
+#.Synopsis
+#   Converts XmlDSL to a ScriptBlock
+#.Description
+#  This is the REAL work-horse for the XML mini-dsl
+[CmdletBinding()]
+Param(
+   [Parameter(Mandatory = $true, Position = 0)]
+   [ScriptBlock]$script,
+
+   [AllowNull()][AllowEmptyString()][AllowEmptyCollection()]
+   [Parameter(Position=1, Mandatory = $false, ValueFromRemainingArguments=$true)]
+   [PSObject[]]$namespaces
+)
+   while($namespaces) {
+        $prefix, $xnamespace, $namespaces = $namespaces
+        if ($xnamespace -is [XNamespace]) {
+            Add-XNameSpace -prefix $prefix -namespace $xnamespace
+        }
+   }
     $parserrors = $null
     $global:tokens = [PSParser]::Tokenize( $script, [ref]$parserrors )
     [Array]$duds = $global:tokens | Where-Object { $_.Type -eq "Command" -and !$_.Content.Contains('-') -and ($Null -eq $(Get-Command $_.Content -Type Alias,Cmdlet,Function,ExternalScript -EA 0)) }
@@ -1180,4 +1203,4 @@ function ConvertFrom-XmlDsl {
     Write-Output ([ScriptBlock]::Create( ($ScriptText -join "`n") ))
 }
 
-Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Remove-XmlElement, Get-XmlContent, Set-XmlContent, Convert-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml, Import-Html, ConvertFrom-Html
+Export-ModuleMember -alias * -function ConvertFrom-XmlDsl, New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Remove-XmlElement, Get-XmlContent, Set-XmlContent, Convert-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml, Import-Html, ConvertFrom-Html
