@@ -49,16 +49,16 @@
 #                Run the PSScriptAnalyzer
 
 
-# FOR PowerShell previous to 5, comment out the using statements...
-using namespace System.Xml
-using namespace System.Xml.Xsl
-using namespace System.Xml.Linq
-using namespace System.Collections.Generic
-using namespace System.Management.Automation
+# FOR PowerShell 5, we should be able to use using statements...
+# using namespace System.Xml
+# using namespace System.Xml.Xsl
+# using namespace System.Xml.Linq
+# using namespace System.Collections.Generic
+# using namespace System.Management.Automation
 
 Add-Type -Assembly System.Xml.Linq
 
-if($PSVersionTable.PSVersion -lt "5.0") {
+#if($PSVersionTable.PSVersion -lt "5.0") {
     &{ 
         if($xlr8r = [psobject].assembly.gettype("System.Management.Automation.TypeAccelerators")) {
 
@@ -124,7 +124,7 @@ if($PSVersionTable.PSVersion -lt "5.0") {
             }
 
             @($x1.GetTypes()) + @($x2.GetTypes()) | ? {
-                $_.IsPublic -and !$_.IsSerializable -and $_.Name -ne "Extensions" -and !$xlr8r::Get[$_.Name]
+                $_.IsPublic -and $_.Name -ne "Extensions" -and !$xlr8r::Get[$_.Name]
             } | Add-Accelerator
 
             Add-Accelerator "Dictionary" "System.Collections.Generic.Dictionary``2"
@@ -132,7 +132,7 @@ if($PSVersionTable.PSVersion -lt "5.0") {
             Add-Accelerator "PSParser" "System.Management.Automation.PSParser"
         }
     }
-}
+# }
 
 function Get-XmlContent {
     #.Synopsis
@@ -840,7 +840,10 @@ function Get-Namespace {
 ######## Helper functions for working with CliXml
 
 function ConvertFrom-CliXml {
+    #.Synopsis
+    #   Imports CliXml content and creates corresponding objects within Windows PowerShell.
     param(
+        # Specifies the XML content
         [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
         [ValidateNotNullOrEmpty()]
         [String[]]$InputObject
@@ -873,7 +876,11 @@ function ConvertFrom-CliXml {
 }
 
 function ConvertTo-CliXml {
+    #.Synopsis
+    #   Creates an CliXml-based representation of an object or objects and outputs it
     param(
+        # Specifies the object to be converted. Enter a variable that contains the objects, or type a command or expression that gets the objects. 
+        # You can also pipe objects to ConvertTo-Clixml.
         [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
         [ValidateNotNullOrEmpty()]
         [PSObject[]]$InputObject
@@ -1168,4 +1175,4 @@ function ConvertFrom-XmlDsl {
     Write-Output ([ScriptBlock]::Create( ($ScriptText -join "`n") ))
 }
 
-Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Remove-XmlElement, Get-Namespace, Get-XmlContent, Set-XmlContent, Convert-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml, Import-Html, ConvertFrom-Html
+Export-ModuleMember -alias * -function New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Remove-XmlElement, Get-XmlContent, Set-XmlContent, Convert-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml, Import-Html, ConvertFrom-Html
