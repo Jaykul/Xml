@@ -179,20 +179,30 @@ Set-Alias gxml Get-XmlContent
 Set-Alias gx Get-XmlContent
 
 function Set-XmlContent {
-param(
-    [Parameter(Mandatory=$true, Position=1)]
-    [Alias("PSPath")]
-    [String]$Path
-,
-    # Specifies one or more XML nodes to search.
-    [Parameter(Position=5,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
-    [ValidateNotNullOrEmpty()]
-    [Alias("Node")]
-    [Xml]$Xml
-)
-process {
-    $xml.Save( $Path )
-}
+    #.Synopsis
+    #  Save an XmlDocument or Node to the specified file path
+    [CmdletBinding()]
+    param(
+        # The Path to the file where you want to save this XML
+        [Parameter(Mandatory=$true, Position=1)]
+        [Alias("PSPath")]
+        [String[]]$Path,
+
+        # Specifies one or more XML nodes to search.
+        [Parameter(Position=5,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [ValidateNotNullOrEmpty()]
+        [Alias("Node")]
+        [Xml]$Xml,
+
+        [Parameter()]
+        [Switch]$Formatted
+    )
+    process {
+        if($Formatted) {
+            Set-Content $Path (Format-Xml $Xml)
+        }
+        Set-Content $Path $Xml.OuterXml
+    }
 }
 
 Set-Alias Export-Xml Set-XmlContent
