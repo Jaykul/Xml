@@ -43,7 +43,7 @@
 # Version    6.4 Fixed a bug on New-XElement for Rudy Shockaert (nice bug report, thanks!)
 # Version    6.5 Added -Parameters @{} parameter to New-XDocument to allow local variables to be passed into the module scope. *grumble*
 # Version    6.6 Expose Convert-Xml and fix a couple of bugs (I can't figure how they got here)
-
+# Version    6.7 Idempotent ConvertFrom-XmlDsl. New-XDocument -Content changed, -DSL added.
 function Add-Accelerator {
 <#
    .Synopsis
@@ -970,6 +970,10 @@ PROCESS {
                $attrib = ConvertFrom-XmlDsl $attrib
                Write-Verbose "Reparsed DSL: $attrib"
                & $attrib
+            } elseif ( $value -is [ScriptBlock] -and "-DSL".StartsWith($attrib.TrimEnd(':').ToUpper())) {
+               $value = ConvertFrom-XmlDsl $value
+               Write-Verbose "Reparsed DSL: $value"
+               & $value
             } elseif ( $value -is [ScriptBlock] -and "-CONTENT".StartsWith($attrib.TrimEnd(':').ToUpper())) {
                $value = ConvertFrom-XmlDsl $value
                Write-Verbose "Reparsed DSL: $value"
@@ -1055,7 +1059,7 @@ function ConvertFrom-XmlDsl {
 Param([ScriptBlock]$script)
    $parserrors = $null
    $global:tokens = [PSParser]::Tokenize( $script, [ref]$parserrors )
-   [Array]$duds = $global:tokens | Where-Object { $_.Type -eq "Command" -and !$_.Content.Contains('-') -and ($(Get-Command $_.Content -Type Cmdlet,Function,ExternalScript -EA 0) -eq $Null) }
+   [Array]$duds = $global:tokens | Where-Object { $_.Type -eq "Command" -and !$_.Content.Contains('-') -and ($(Get-Command $_.Content -Type Alias,Cmdlet,Function,ExternalScript -EA 0) -eq $Null) }
    if($duds) {
      [Array]::Reverse( $duds )
    }
