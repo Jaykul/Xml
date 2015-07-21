@@ -1149,7 +1149,7 @@ function Add-XNamespace {
         [Parameter(Mandatory=$true)]$prefix,
         [Parameter(Mandatory=$true)]$namespace
     )
-    if ($null =eq $script:NameSpaceHash) {
+    if ($null -eq $script:NameSpaceHash) {
        $script:NameSpaceHash = New-Object 'Dictionary[String,XNamespace]'
     }
     if ($script:NameSpaceHash.ContainsKey($prefix)) {
