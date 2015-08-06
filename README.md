@@ -61,15 +61,23 @@ The XML DSL
 
 Simply put, write something that looks like PowerShell, but each command is converted to an XML element, and each parameter/value is turned into an attribute and it's value.
 
-It really has only one built-in command: `New-XDocument` (better known by it's alias: `XML`), which creates the new XML document!
-
 Any "command" _that's not a real command_ turns into an XML node, and any parameters turn into attributes. 
 
-Passing a scriptblock to these fake commands creates nested elements.
+Passing a ScriptBlock to these fake commands creates nested elements.
 
 At any point (even nested several levels deep in the XML document) you can call PowerShell commands to output objects and convert them into XML nested inside your document.
 
+XML DSL Commands
+-----------------------------
 
+#### New-XDocument (Alias: `XML`)
+> Creates a new XML document [System.Xml.Linq.XDocument] from XmlDsl or a standard ScriptBlock.
+
+#### New-XElement
+> Creates a new XML element [System.Xml.Linq.XElement] from XmlDsl or a standard ScriptBlock.
+
+#### ConvertFrom-XmlDsl
+> Converts XmlDsl to a standard ScriptBlock.  If you are creating individual documents, ignore this command and send your XmlDsl directly to the New-X* commands above.  However, for improved performance when calling New-X* commands multiple times with the same XmlDsl template, use the output of this function for those New-X* commands combined with -BlockType Script to bypass the overhead of conversion.  
 
 Version History:
 ================
@@ -92,7 +100,7 @@ Version History:
 * **5.0** Added Update-Xml to allow setting xml attributes or node content
 * **6.0** Major cleanup, breaking changes.
   * Added Get-XmlContent and Set-XmlContent for loading/saving XML from files or strings
-  * Removed Path and Content parameters from the other functions (it greatly simplifies thost functions, and makes the whole thing more maintainable)
+  * Removed Path and Content parameters from the other functions (it greatly simplifies those functions, and makes the whole thing more maintainable)
   * Updated Update-Xml to support adding nodes "before" and "after" other nodes, and to support "remove"ing nodes
 * **6.1** Update for PowerShell 3.0
 * **6.2** Minor tweak in exception handling for CliXml
@@ -101,3 +109,4 @@ Version History:
 * **6.5** Added -Parameters @{} parameter to New-XDocument to allow local variables to be passed into the module scope. *grumble*
 * **6.6** Expose Convert-Xml and fix a couple of bugs (I can't figure how they got here)
 * **6.7** Add ConvertFrom-Html, add -Formatted switch to Set-XmlContent. Reformat and clean up to (mostly) match the new best practices I'm working on. Finally put the module on github.
+* **6.8** Facilitate reuse of ConvertFrom-XmlDsl. Add Add-XNamespace. Added -BlockType param to New-XDocument (default: XmlDsl), New-XElement (default: Script)
