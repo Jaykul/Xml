@@ -1180,7 +1180,7 @@ Param(
    while($namespaces) {
         $prefix, $xnamespace, $namespaces = $namespaces
         if ($xnamespace -is [XNamespace]) {
-            Add-XNameSpace -prefix $prefix -namespace $xnamespace
+            Add-XNameSpace -prefix $prefix.TrimStart("-").TrimEnd(':') -namespace $xnamespace
         }
    }
     $parserrors = $null
