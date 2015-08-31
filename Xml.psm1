@@ -635,45 +635,48 @@ function ConvertFrom-Html {
     return $xml
 }
 
-
 function Convert-Xml {
     #.Synopsis
     #   The Convert-XML function lets you use Xslt to transform XML strings and documents.
     #.Description
     #   Documentation TODO
-    [CmdletBinding(DefaultParameterSetName="Xml")]
+    [CmdletBinding(DefaultParameterSetName="Xsl")]
     param(
         # Specifies one or more XML nodes to process.
-        [Parameter(Position=1,ParameterSetName="Xml",Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [Parameter(Position=1,Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
         [ValidateNotNullOrEmpty()]
         [Alias("Node")]
         [XmlNode[]]$Xml,
 
         # Specifies an Xml StyleSheet to transform with...
-        [Parameter(Position=0,Mandatory=$true,ValueFromPipeline=$false)]
+        [Parameter(Position=0,ParameterSetName="Xsl",Mandatory=$true,ValueFromPipeline=$false)]
         [ValidateNotNullOrEmpty()]
         [Alias("StyleSheet")]
         [String]$Xslt,
 
+        # Specifies a custom XslCompiledTransform to transform with...
+        [Parameter(Position=0,ParameterSetName="XslCompiledTransform",Mandatory=$true,ValueFromPipeline=$false)]
+        [XslCompiledTransform]$CompiledTransform=(New-Object XslCompiledTransform),
 
         # Specify arguments to the XSL Transformation
         [Alias("Parameters")]
         [hashtable]$Arguments
     )
     begin {
-        $StyleSheet = New-Object XslCompiledTransform
+        if ($PSCmdlet.ParameterSetName -eq "Xsl") {
             if(Test-Path $Xslt -EA 0) {
                 Write-Verbose "Loading Stylesheet from $(Resolve-Path $Xslt)"
-            $StyleSheet.Load( (Resolve-Path $Xslt) )
+                $CompiledTransform.Load( (Resolve-Path $Xslt), $XsltSettings, $XmlResolver )
             } else {
                 $OFS = "`n"
                 Write-Verbose "$Xslt"
-            $StyleSheet.Load(([XmlReader]::Create((New-Object System.IO.StringReader $Xslt))))
+                $CompiledTransform.Load(([XmlReader]::Create((New-Object System.IO.StringReader $Xslt))), $XsltSettings, $XmlResolver )
+            }
         }
     }
     process {
         foreach($node in $Xml) {
-            Convert-Node -Xml (New-Object Xml.XmlNodeReader $node) $StyleSheet $Arguments
+            Convert-Node -Xml (New-Object Xml.XmlNodeReader $node) $CompiledTransform $Arguments
         }
     }
 }
