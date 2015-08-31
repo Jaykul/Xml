@@ -666,11 +666,11 @@ function Convert-Xml {
         if ($PSCmdlet.ParameterSetName -eq "Xsl") {
             if(Test-Path $Xslt -EA 0) {
                 Write-Verbose "Loading Stylesheet from $(Resolve-Path $Xslt)"
-                $CompiledTransform.Load( (Resolve-Path $Xslt), $XsltSettings, $XmlResolver )
+                $CompiledTransform.Load( (Resolve-Path $Xslt) )
             } else {
                 $OFS = "`n"
                 Write-Verbose "$Xslt"
-                $CompiledTransform.Load(([XmlReader]::Create((New-Object System.IO.StringReader $Xslt))), $XsltSettings, $XmlResolver )
+                $CompiledTransform.Load(([XmlReader]::Create((New-Object System.IO.StringReader $Xslt))))
             }
         }
     }
