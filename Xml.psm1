@@ -217,8 +217,9 @@ function Set-XmlContent {
     process {
         if($Formatted) {
             Set-Content $Path (Format-Xml $Xml)
+        } else {
+            Set-Content $Path $Xml.OuterXml
         }
-        Set-Content $Path $Xml.OuterXml
     }
 }
 
@@ -654,18 +655,19 @@ function Convert-Xml {
         [Alias("StyleSheet")]
         [String]$Xslt,
 
+
         # Specify arguments to the XSL Transformation
         [Alias("Parameters")]
         [hashtable]$Arguments
     )
     begin {
         $StyleSheet = New-Object XslCompiledTransform
-        if(Test-Path $Xslt -EA 0) {
-            Write-Verbose "Loading Stylesheet from $(Resolve-Path $Xslt)"
+            if(Test-Path $Xslt -EA 0) {
+                Write-Verbose "Loading Stylesheet from $(Resolve-Path $Xslt)"
             $StyleSheet.Load( (Resolve-Path $Xslt) )
-        } else {
-            $OFS = "`n"
-            Write-Verbose "$Xslt"
+            } else {
+                $OFS = "`n"
+                Write-Verbose "$Xslt"
             $StyleSheet.Load(([XmlReader]::Create((New-Object System.IO.StringReader $Xslt))))
         }
     }
