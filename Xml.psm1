@@ -262,7 +262,7 @@ function Format-Xml {
         [int]$Indent=2,
 
         # The indent character (defaults to a space)
-        [char]$Character
+        [char]$Character = ' '
     )
     process {
         ## Load from file, if necessary
