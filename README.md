@@ -61,6 +61,8 @@ The XML DSL
 
 Simply put, write something that looks like PowerShell, but each command is converted to an XML element, and each parameter/value is turned into an attribute and it's value.
 
+It really has only one built-in command: `New-XDocument` (better known by it's alias: `XML`), which creates the new XML document!
+
 Any "command" _that's not a real command_ turns into an XML node, and any parameters turn into attributes. 
 
 Passing a ScriptBlock to these fake commands creates nested elements.
@@ -109,4 +111,4 @@ Version History:
 * **6.5** Added -Parameters @{} parameter to New-XDocument to allow local variables to be passed into the module scope. *grumble*
 * **6.6** Expose Convert-Xml and fix a couple of bugs (I can't figure how they got here)
 * **6.7** Add ConvertFrom-Html, add -Formatted switch to Set-XmlContent. Reformat and clean up to (mostly) match the new best practices I'm working on. Finally put the module on github.
-* **6.8** Facilitate reuse of ConvertFrom-XmlDsl. Add Add-XNamespace. Added -BlockType param to New-XDocument (default: XmlDsl), New-XElement (default: Script)
+* **7.0** Update to publish to PowerShell Gallery

@@ -4,7 +4,7 @@
 RootModule = 'Xml.psm1'
 
 # Version number of this module.
-ModuleVersion = '6.7'
+ModuleVersion = '7.0'
 
 # ID used to uniquely identify this module
 GUID = '9f58549b-020b-4908-b8ce-8b37ed8f5a2b'
@@ -13,10 +13,10 @@ GUID = '9f58549b-020b-4908-b8ce-8b37ed8f5a2b'
 Author = 'Joel "Jaykul" Bennett'
 
 # Company or vendor of this module
-CompanyName = 'Huddled Masses'
+CompanyName = 'HuddledMasses.org'
 
 # Copyright statement for this module
-Copyright = '(c) 2015 Joel Bennett. All rights reserved.'
+Copyright = '(c) 2016 Joel Bennett. All rights reserved.'
 
 # Description of the functionality provided by this module
 Description = 'A module providing converters for HTML to XML, various core XML commands and a DSL for generating XML documents.'
@@ -96,7 +96,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = "Add ConvertFrom-Html, add -Formatted switch to Set-XmlContent. Reformat and clean up to (mostly) match the new best practices I`'m working on. Finally put the module on github."
+        ReleaseNotes = 'Fix PSScriptAnalyzer rules before uploading to the PowerShellGallery'
 
     } # End of PSData hashtable
 
