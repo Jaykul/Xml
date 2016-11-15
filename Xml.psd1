@@ -1,4 +1,4 @@
-﻿@{
+@{
 
 # Script module or binary module file associated with this manifest.
 RootModule = 'Xml.psm1'
@@ -61,7 +61,7 @@ Description = 'A module providing converters for HTML to XML, various core XML c
 FunctionsToExport = 'New-XDocument', 'New-XAttribute', 'New-XElement', 'Remove-XmlNamespace', 'Remove-XmlElement', 'Get-XmlContent', 'Set-XmlContent', 'Convert-Xml', 'Select-Xml', 'Update-Xml', 'Format-Xml', 'ConvertTo-CliXml', 'ConvertFrom-CliXml', 'Import-Html', 'ConvertFrom-Html'
 
 # Cmdlets to export from this module
-# CmdletsToExport = 
+# CmdletsToExport =
 
 # Variables to export from this module
 # VariablesToExport = '*'
