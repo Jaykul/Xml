@@ -111,4 +111,6 @@ Version History:
 * **6.5** Added -Parameters @{} parameter to New-XDocument to allow local variables to be passed into the module scope. *grumble*
 * **6.6** Expose Convert-Xml and fix a couple of bugs (I can't figure how they got here)
 * **6.7** Add ConvertFrom-Html, add -Formatted switch to Set-XmlContent. Reformat and clean up to (mostly) match the new best practices I'm working on. Finally put the module on github.
+* **6.8** Facilitate reuse of ConvertFrom-XmlDsl. Add Add-XNamespace. Added -BlockType param to New-XDocument (default: XmlDsl), New-XElement (default: Script)
 * **7.0** Update to publish to PowerShell Gallery
+* **7.1** Fix New-XDocument for documents with no namespaces.
