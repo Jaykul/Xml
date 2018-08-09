@@ -4,7 +4,7 @@
 RootModule = 'Xml.psm1'
 
 # Version number of this module.
-ModuleVersion = '7.0'
+ModuleVersion = '7.1'
 
 # ID used to uniquely identify this module
 GUID = '9f58549b-020b-4908-b8ce-8b37ed8f5a2b'
@@ -16,7 +16,7 @@ Author = 'Joel "Jaykul" Bennett'
 CompanyName = 'HuddledMasses.org'
 
 # Copyright statement for this module
-Copyright = '(c) 2016 Joel Bennett. All rights reserved.'
+Copyright = '(c) 2018 Joel Bennett. All rights reserved.'
 
 # Description of the functionality provided by this module
 Description = 'A module providing converters for HTML to XML, various core XML commands and a DSL for generating XML documents.'
@@ -58,7 +58,7 @@ Description = 'A module providing converters for HTML to XML, various core XML c
 # NestedModules = @()
 
 # Functions to export from this module
-FunctionsToExport = 'New-XDocument', 'New-XAttribute', 'New-XElement', 'Remove-XmlNamespace', 'Remove-XmlElement', 'Get-XmlContent', 'Set-XmlContent', 'Convert-Xml', 'Select-Xml', 'Update-Xml', 'Format-Xml', 'ConvertTo-CliXml', 'ConvertFrom-CliXml', 'Import-Html', 'ConvertFrom-Html'
+FunctionsToExport = 'New-XDocument', 'New-XAttribute', 'New-XElement', 'Remove-XmlNamespace', 'Remove-XmlElement', 'Get-XmlContent', 'Set-XmlContent', 'Convert-Xml', 'Select-Xml', 'Update-Xml', 'Format-Xml', 'ConvertTo-CliXml', 'ConvertFrom-CliXml', 'Import-Html', 'ConvertFrom-Html', 'ConvertFrom-XmlDsl'
 
 # Cmdlets to export from this module
 # CmdletsToExport =
@@ -96,7 +96,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'Fix PSScriptAnalyzer rules before uploading to the PowerShellGallery'
+        ReleaseNotes = 'Fix Add-XNamespace for documents requiring no namespace at all.'
 
     } # End of PSData hashtable
 

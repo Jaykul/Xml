@@ -1202,7 +1202,7 @@ Param(
         if( $token.Content.Contains(":") ) {
             $key, $localname = $token.Content -split ":"
             $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[$key] + $localname) + "'" )
-        } else {
+        } elseif ($script:NameSpaceHash -ne $null -and $script:NameSpaceHash.ContainsKey('')) {
             $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[''] + $token.Content) + "'" )
         }
         # insert 'xe' before everything (unless it's a valid command)
