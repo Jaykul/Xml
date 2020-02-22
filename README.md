@@ -1,6 +1,12 @@
 # XML - A Module by Joel Bennett
 
-A module providing converters for HTML to XML, various core XML commands and most importantly, _a DSL for generating XML documents_.
+A module providing converters for HTML to XML, various core XML commands and most importantly, _a DSL for generating XML documents_. You can install it easily:
+
+```PowerShell
+Install-Module -Name Xml
+```
+
+There are quite a few commands, the last of which create a DSL for generating XML documents using PowerShell syntax.
 
 Two commands to convert HTML into XML
 -------------------------------------
@@ -63,11 +69,53 @@ Simply put, write something that looks like PowerShell, but each command is conv
 
 It really has only one built-in command: `New-XDocument` (better known by it's alias: `XML`), which creates the new XML document!
 
-Any "command" _that's not a real command_ turns into an XML node, and any parameters turn into attributes. 
+Any "command" _that's not a real command_ turns into an XML node, and any parameters turn into attributes.
 
 Passing a ScriptBlock to these fake commands creates nested elements.
 
 At any point (even nested several levels deep in the XML document) you can call PowerShell commands to output objects and convert them into XML nested inside your document.
+
+Here's a simple example:
+
+```PowerShell
+$xml = New-XDocument rss -version "2.0" {
+    channel {
+        title {"Test RSS Feed"}
+        link {"http://HuddledMasses.org"}
+        description {"An RSS Feed generated simply to demonstrate my XML DSL"}
+        item {
+            title {"New Site, New Layout, Lost Posts"}
+            link {"http://huddledmasses.org/new-site-new-layout-lost-posts/"}
+            guid -isPermaLink $true {"http://huddledmasses.org/new-site-new-layout-lost-posts/"}
+            description {"Ema Lazarus' Poem"}
+            pubDate {(Get-Date 10/31/2003 -f u) -replace " ","T"}
+        }
+    }
+}
+```
+
+This creates a simple RSS feed with just a single item in it. The key, of course, is that you _could_ put a loop around the `item` to generate a bunch of them.
+
+To get the XML back, you can just output it as a string, like `"$xml"`, or --to make sure you have the `<?XML` declaration at the top-- you can call the `ToFullString()` method, like: `$xml.ToFullString()` which would output the formatted xml:
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rss version="2.0">
+  <channel>
+  <title>Test RSS Feed</title>
+  <link>http://HuddledMasses.org</link>
+  <description>An RSS Feed generated simply to demonstrate my XML DSL</description>
+  <item>
+    <title>New Site, New Layout, Lost Posts</title>
+    <link>http://huddledmasses.org/new-site-new-layout-lost-posts/</link>
+    <guid isPermaLink="true">http://huddledmasses.org/new-site-new-layout-lost-posts/</guid>
+    <description>Ema Lazarus' Poem</description>
+    <pubDate>2003-10-31T00:00:00Z</pubDate>
+  </item>
+  </channel>
+</rss>
+```
+
 
 XML DSL Commands
 -----------------------------
@@ -78,15 +126,18 @@ XML DSL Commands
 #### New-XElement
 > Creates a new XML element [System.Xml.Linq.XElement] from XmlDsl or a standard ScriptBlock.
 
+#### Add-XNamespace (Alias `ns`)
+> Registers a namespace with a -prefix to avoid needing to specify namespaces inside the XmlDsl scripts.
+
 #### ConvertFrom-XmlDsl
-> Converts XmlDsl to a standard ScriptBlock.  If you are creating individual documents, ignore this command and send your XmlDsl directly to the New-X* commands above.  However, for improved performance when calling New-X* commands multiple times with the same XmlDsl template, use the output of this function for those New-X* commands combined with -BlockType Script to bypass the overhead of conversion.  
+> Converts XmlDsl to a standard ScriptBlock.  If you are creating individual documents, ignore this command and send your XmlDsl directly to the New-X* commands above.  However, for improved performance when calling New-X* commands multiple times with the same XmlDsl template, use the output of this function for those New-X* commands combined with -BlockType Script to bypass the overhead of conversion.
 
 Version History:
 ================
 
 * **2.0** This was the first script version I wrote. It didn't function identically to the built-in Select-Xml with regards to parameter parsing
 * **2.1** Matched the built-in Select-Xml parameter sets, it's now a drop-in replacement, BUT only if you were using the original with: Select-Xml ... | Select-Object -Expand Node
-* **2.2** Fixes a bug in the -Content parameterset where -RemoveNamespace was *presumed* 
+* **2.2** Fixes a bug in the -Content parameterset where -RemoveNamespace was *presumed*
 * **3.0** Added New-XDocument and associated generation functions for my XML DSL
 * **3.1** Fixed a really ugly bug in New-XDocument in 3.0 which I should not have released
 * **4.0** Never content to leave well enough alone, I completely reworked New-XDocument

@@ -1,16 +1,8 @@
 #requires -version 2.0
 
-# Improves over the built-in Select-XML by leveraging Remove-XmlNamespace http`://poshcode.org/1492
-# to provide a -RemoveNamespace parameter -- if it's supplied, all of the namespace declarations
-# and prefixes are removed from all XML nodes (by an XSL transform) before searching.
-# IMPORTANT: returned results *will not* have namespaces in them, even if the input XML did.
-
-# Also, only raw XmlNodes are returned from this function, so the output isn't completely compatible
-# with the built in Select-Xml. It's equivalent to using Select-Xml ... | Select-Object -Expand Node
-
 # Version History:
 # Select-Xml 2.0 This was the first script version I wrote.
-#                it didn't function identically to the built-in Select-Xml with regards to parameter parsing
+#                it doesn't function identically to the built-in Select-Xml with regards to parameter parsing
 # Select-Xml 2.1 Matched the built-in Select-Xml parameter sets, it's now a drop-in replacement
 #                BUT only if you were using the original with: Select-Xml ... | Select-Object -Expand Node
 # Select-Xml 2.2 Fixes a bug in the -Content parameterset where -RemoveNamespace was *presumed*
@@ -51,92 +43,102 @@
 #                Add Add-XNamespace
 #                Change ConvertFrom-XmlDsl exported, idempotent, accepts namespace arguments
 #                Added -BlockType param to New-XDocument (default: XmlDsl), New-XElement (default: Script); defaults set for backwards compatibility
+# Version    7.0 Fixed the PSScriptAnalyzer rule violation and finally published to the PowerShellGallery
+# Version    7.1 Add ToFullString for XDocument
+#                Improve Namespace functionality more
 
 
-# FOR PowerShell 5, we should be able to use using statements...
+# In PowerShell 5, we could use "using namespace" but it's not actually want to spew these to the global accelerators
 # using namespace System.Xml
 # using namespace System.Xml.Xsl
 # using namespace System.Xml.Linq
 # using namespace System.Collections.Generic
 # using namespace System.Management.Automation
 
+Add-Type -Assembly System.Xml
 Add-Type -Assembly System.Xml.Linq
 
-#if($PSVersionTable.PSVersion -lt "5.0") {
-    &{
-        if($xlr8r = [psobject].assembly.gettype("System.Management.Automation.TypeAccelerators")) {
+&{
+    if(($xlr8r = [psobject].assembly.gettype("System.Management.Automation.TypeAccelerators"))) {
 
-            $x1 = [Reflection.Assembly]::Load("System.Xml, Version=3.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
-            $x2 = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
+        $x1 = [Reflection.Assembly]::Load("System.Xml, Version=3.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
+        $x2 = [Reflection.Assembly]::Load("System.Xml.Linq, Version=3.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")
 
-            function Add-Accelerator {
-                <#
-                    .Synopsis
-                        Add a type accelerator to the current session
-                    .Description
-                        The Add-Accelerator function allows you to add a simple type accelerator (like [regex]) for a longer type (like [System.Text.RegularExpressions.Regex]).
-                    .Example
-                        Add-Accelerator list System.Collections.Generic.List``1
-                        $list = New-Object list[string]
+        function Set-Accelerator {
+            <#
+                .Synopsis
+                    Sets a type accelerator for the current session
+                .Description
+                    The Set-Accelerator function allows you to create a simple type accelerator (like [regex]) for a longer type (like [System.Text.RegularExpressions.Regex]).
+                .Example
+                    Set-Accelerator list System.Collections.Generic.List``1
+                    $list = New-Object list[string]
 
-                        Creates an accelerator for the generic List[T] collection type, and then creates a list of strings.
-                    .Example
-                        Add-Accelerator "List T", "GList" System.Collections.Generic.List``1
-                        $list = New-Object "list t[string]"
+                    Creates an accelerator for the generic List[T] collection type, and then creates a list of strings.
+                .Example
+                    Set-Accelerator "List T", "GList" System.Collections.Generic.List``1
+                    $list = New-Object "list t[string]"
 
-                        Creates two accelerators for the Generic List[T] collection type.
-                    .Notes
-                        When specifying multiple values for a parameter, use commas to separate the values.
-                        For example, "-Accelerator string, regex".
+                    Creates two accelerators for the Generic List[T] collection type.
+                .Notes
+                    When specifying multiple values for a parameter, use commas to separate the values.
+                    For example, "-Accelerator string, regex".
 
-                        PowerShell requires arguments that are "types" to NOT have the square bracket type notation, because of the way the parsing engine works.  You can either just type in the type as System.Int64, or you can put parentheses around it to help the parser out: ([System.Int64])
+                    PowerShell requires arguments that are "types" to NOT have the square bracket type notation, because of the way the parsing engine works.  You can either just type in the type as System.Int64, or you can put parentheses around it to help the parser out: ([System.Int64])
 
-                        Also see the help for Get-Accelerator and Remove-Accelerator
-                #>
-                [CmdletBinding()]
-                param(
-                    # The short form accelerator should be just the name you want to use (without square brackets).
-                    [Parameter(Position=0,ValueFromPipelineByPropertyName=$true)]
-                    [Alias("Key","Name")]
-                    [string[]]$Accelerator,
+                    Also see the help for Get-Accelerator and Remove-Accelerator
+            #>
+            [CmdletBinding()]
+            param(
+                # The short form accelerator should be just the name you want to use (without square brackets).
+                [Parameter(Position=0,ValueFromPipelineByPropertyName=$true)]
+                [Alias("Key","Name")]
+                [string[]]$Accelerator,
 
-                    # The type you want the accelerator to accelerate (without square brackets)
-                    [Parameter(Position=1,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
-                    [Alias("Value","FullName")]
-                    [type]$Type
-                )
-                process {
-                    # add a user-defined accelerator
-                    foreach($a in $Accelerator) {
-                        if($xlr8r::AddReplace) {
-                            $xlr8r::AddReplace( $a, $Type)
-                        } else {
-                            $null = $xlr8r::Remove( $a )
-                            $xlr8r::Add( $a, $Type)
-                        }
-                        trap [System.Management.Automation.MethodInvocationException] {
-                            if($xlr8r::get.keys -contains $a) {
-                                if($xlr8r::get[$a] -ne $Type) {
-                                    Write-Error "Cannot add accelerator [$a] for [$($Type.FullName)]`n                  [$a] is already defined as [$($xlr8r::get[$a].FullName)]"
-                                }
-                                Continue;
+                # The type you want the accelerator to accelerate (without square brackets)
+                [Parameter(Position=1,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+                [Alias("Value","FullName")]
+                [type]$Type,
+
+                # If NoClobber is set, accelerators which would overwrite an existing accelerator will not be set
+                [switch]$NoClobber
+            )
+            process {
+                # add a user-defined accelerator
+                foreach ($a in $Accelerator) {
+                    if ($NoClobber -and $xlr8r::Get.ContainsKey($a)) {
+                        continue
+                    }
+                    if ($xlr8r::AddReplace) {
+                        $xlr8r::AddReplace($a, $Type)
+                    } else {
+                        $null = $xlr8r::Remove($a)
+                        $xlr8r::Add($a, $Type)
+                    }
+                    trap [System.Management.Automation.MethodInvocationException] {
+                        if ($xlr8r::Get.ContainsKey($a)) {
+                            if ($xlr8r::Get[$a] -ne $Type) {
+                                Write-Error "Cannot add accelerator [$a] for [$($Type.FullName)]`n                  [$a] is already defined as [$($xlr8r::Get[$a].FullName)]"
                             }
-                            throw
+                            continue
                         }
+                        throw
                     }
                 }
             }
-
-            @($x1.GetTypes()) + @($x2.GetTypes()) | Where-Object {
-                $_.IsPublic -and $_.Name -ne "Extensions" -and !$xlr8r::Get[$_.Name]
-            } | Add-Accelerator
-
-            Add-Accelerator "Dictionary" "System.Collections.Generic.Dictionary``2"
-            Add-Accelerator "List" "System.Collections.Generic.List``1"
-            Add-Accelerator "PSParser" "System.Management.Automation.PSParser"
         }
+
+        $IgnoreableNS = "System.Xml.Schema", "System.Xml.Xsl.Runtime", "System.Xml.Serialization"
+
+        ([System.Xml.XmlDocument].Assembly.GetExportedTypes() + [System.Xml.Linq.XDocument].Assembly.GetExportedTypes()).Where{
+            $_.Name -ne "Extensions" -and $_.Namespace -notin $IgnoreableNS
+        } | Set-Accelerator -NoClobber
+
+        Set-Accelerator "Dictionary" "System.Collections.Generic.Dictionary``2"
+        Set-Accelerator "List" "System.Collections.Generic.List``1"
+        Set-Accelerator "PSParser" "System.Management.Automation.PSParser"
     }
-# }
+}
 
 function Get-XmlContent {
     #.Synopsis
@@ -309,14 +311,16 @@ function SelectXmlNode {
 }
 
 function Select-Xml {
-    #.Synopsis
-    #  The Select-XML cmdlet lets you use XPath queries to search for text in XML strings and documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
-    #.Description
-    #  Improves over the built-in Select-XML by leveraging Remove-XmlNamespace to provide a -RemoveNamespace parameter -- if it's supplied, all of the namespace declarations and prefixes are removed from all XML nodes (by an XSL transform) before searching.
-    #
-    #  However, only raw XmlNodes are returned from this function, so the output isn't currently compatible with the built in Select-Xml, but is equivalent to using Select-Xml ... | Select-Object -Expand Node
-    #
-    #  Also note that if the -RemoveNamespace switch is supplied the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
+    <#
+        .SYNOPSIS
+            The Select-XML cmdlet lets you use XPath queries to search for text in XML strings and documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
+        .DESCRIPTION
+            Improves over the built-in Select-XML by leveraging Remove-XmlNamespace to provide a -RemoveNamespace parameter -- if it's supplied, all of the namespace declarations and prefixes are removed from all XML nodes (by an XSL transform) before searching.
+
+            However, only raw XmlNodes are returned from this function, so the output isn't currently compatible with the built in Select-Xml, but is equivalent to using Select-Xml ... | Select-Object -Expand Node
+
+            Also note that if the -RemoveNamespace switch is supplied the returned results *will not* have namespaces in them, even if the input XML did, and entities get expanded automatically.
+    #>
     [CmdletBinding(DefaultParameterSetName="Xml")]
     param(
         # Specifies an XPath search query. The query language is case-sensitive. This parameter is required.
@@ -386,15 +390,17 @@ Set-Alias slx Select-Xml -EA 0
 
 
 function Update-Xml {
-    #.Synopsis
-    #  The Update-XML cmdlet lets you use XPath queries to replace text in nodes in XML documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
-    #.Description
-    #  Allows you to update an attribute value, xml node contents, etc.
-    #
-    #.Notes
-    #  We still need to implement RemoveNode and RemoveAttribute and even ReplaceNode
-    #
-    #  Also, does not support ShouldProcess -- make a copy of your $XmlNode if you need it
+    <#
+        .SYNOPSIS
+            The Update-XML cmdlet lets you use XPath queries to replace text in nodes in XML documents. Enter an XPath query, and use the Content, Path, or Xml parameter to specify the XML to be searched.
+        .DESCRIPTION
+            Allows you to update an attribute value, xml node contents, etc.
+
+        .NOTES
+            We still need to implement RemoveNode and RemoveAttribute and even ReplaceNode
+
+            Also, does not support ShouldProcess -- make a copy of your $XmlNode if you need it
+    #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions","")]
     [CmdletBinding(DefaultParameterSetName="Set")]
     param(
@@ -537,8 +543,10 @@ Set-Alias uxml Update-Xml -EA 0
 Set-Alias ux Update-Xml -EA 0
 
 function Convert-Node {
-    #.Synopsis
-    # Convert a single XML Node via XSL stylesheets
+    <#
+        .SYNOPSIS
+            Convert a single XML Node via XSL stylesheets
+    #>
     [CmdletBinding(DefaultParameterSetName="Reader")]
     param(
        [Parameter(ParameterSetName="ByNode",Mandatory=$true,ValueFromPipeline=$true)]
@@ -584,8 +592,10 @@ function Convert-Node {
 
 Add-Type -Path "$PSScriptRoot\SgmlReader.dll"
 function Import-Html {
-    #.Synopsis
-    #   Load an HTML file to an XML Document
+    <#
+        .SYNOPSIS
+            Load an HTML file to an XML Document
+    #>
     [CmdletBinding()]
     param(
         # The path to the HTML File
@@ -612,8 +622,10 @@ function Import-Html {
 }
 
 function ConvertFrom-Html {
-    #.Synopsis
-    #   Load HTML text As an XML Document
+    <#
+        .SYNOPSIS
+            Load HTML text As an XML Document
+    #>
     [CmdletBinding()]
     param(
         # The HTML content
@@ -640,8 +652,10 @@ function ConvertFrom-Html {
 }
 
 function Convert-Xml {
-    #.Synopsis
-    #   The Convert-XML function lets you use Xslt to transform XML strings and documents.
+    <#
+        .SYNOPSIS
+            The Convert-XML function lets you use Xslt to transform XML strings and documents.
+    #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidDefaultValueForMandatoryParameter","CompiledTransform")]
     [CmdletBinding(DefaultParameterSetName="Xsl")]
     param(
@@ -686,13 +700,15 @@ function Convert-Xml {
 Set-Alias cvxml Convert-Xml -EA 0
 
 function Remove-XmlNamespace {
-    #.Synopsis
-    #  Removes namespace definitions and prefixes from xml documents
-    #.Description
-    #  Runs an xml document through an XSL Transformation to remove namespaces from it if they exist.
-    #  Entities are also naturally expanded
-    #.Notes
-    #  Does not support ShouldProcess -- make a copy of your $XmlNode if you need it
+    <#
+        .SYNOPSIS
+            Removes namespace definitions and prefixes from xml documents
+        .DESCRIPTION
+            Runs an xml document through an XSL Transformation to remove namespaces from it if they exist.
+            Entities are also naturally expanded
+        .NOTES
+            Does not support ShouldProcess -- make a copy of your $XmlNode if you need it
+    #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions","")]
     [CmdletBinding(DefaultParameterSetName="Xml")]
     param(
@@ -737,13 +753,15 @@ Set-Alias rmxns Remove-XmlNamespace -EA 0
 
 
 function Remove-XmlElement {
-    #.Synopsis
-    #  Removes elements (tags or attributes) matching specified XML Namespace from an Xml document
-    #.Description
-    #  Runs an xml document through an XSL Transformation to remove tags or attributes in namespaces.
-    #  Entities are also naturally expanded
-    #.Notes
-    #  Does not support ShouldProcess -- make a copy of your $XmlNode if you need it
+    <#
+    .SYNOPSIS
+        Removes elements (tags or attributes) matching specified XML Namespace from an Xml document
+    .DESCRIPTION
+        Runs an xml document through an XSL Transformation to remove tags or attributes in namespaces.
+        Entities are also naturally expanded
+    .NOTES
+        Does not support ShouldProcess -- make a copy of your $XmlNode if you need it
+    #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions","")]
     param(
         # Namespaces to remove from the document
@@ -815,8 +833,10 @@ function Remove-XmlElement {
 #Set-Alias rmxns Remove-XmlNamespace -EA 0
 
 function Get-Namespace {
-    #.Synopsis
-    #   Get the XML namespaces from Xml (i.e. from an XmlDocument or any XmlNode) as a hashtable
+    <#
+        .SYNOPSIS
+            Get the XML namespaces from Xml (i.e. from an XmlDocument or any XmlNode) as a hashtable
+    #>
     param(
         # The prefix filter allows you to list the prefixes you want to read from the Xml
         [Parameter(Position=0)]
@@ -848,9 +868,11 @@ function Get-Namespace {
 ######## Helper functions for working with CliXml
 
 function ConvertFrom-CliXml {
-    #.Synopsis
-    #   Imports CliXml content and creates corresponding objects within Windows PowerShell.
-    param(
+    <#
+        .SYNOPSIS
+            Imports CliXml content and creates corresponding objects within Windows PowerShell.
+    #>
+       param(
         # Specifies the XML content
         [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
         [ValidateNotNullOrEmpty()]
@@ -884,8 +906,10 @@ function ConvertFrom-CliXml {
 }
 
 function ConvertTo-CliXml {
-    #.Synopsis
-    #   Creates an CliXml-based representation of an object or objects and outputs it
+    <#
+        .SYNOPSIS
+            Creates an CliXml-based representation of an object or objects and outputs it
+    #>
     param(
         # Specifies the object to be converted. Enter a variable that contains the objects, or type a command or expression that gets the objects.
         # You can also pipe objects to ConvertTo-Clixml.
@@ -921,111 +945,105 @@ function ConvertTo-CliXml {
 ######## From here down is all the code related to my XML DSL:
 
 function New-XDocument {
-    #.Synopsis
-    #   Creates a new XDocument (the new xml document type)
-    #.Description
-    #  This is the root for a new XML mini-dsl, akin to New-BootsWindow for XAML
-    #  It creates a new XDocument, and takes scritpblock(s) to define it's contents
-    #.Example
-    # [string]$xml = New-XDocument rss -version "2.0" {
-    #    channel {
-    #       title {"Test RSS Feed"}
-    #       link {"http`://HuddledMasses.org"}
-    #       description {"An RSS Feed generated simply to demonstrate my XML DSL"}
-    #       item {
-    #          title {"The First Item"}
-    #          link {"http`://huddledmasses.org/new-site-new-layout-lost-posts/"}
-    #          guid -isPermaLink true {"http`://huddledmasses.org/new-site-new-layout-lost-posts/"}
-    #          description {"Ema Lazarus' Poem"}
-    #          pubDate {(Get-Date 10/31/2003 -f u) -replace " ","T"}
-    #       }
-    #    }
-    # }
-    #
-    # C:\PS>$xml.Declaration.ToString()  ## I can't find a way to have this included in the $xml.ToString()
-    # C:\PS>$xml.ToString()
-    #
-    # <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    # <rss version="2.0">
-    #   <channel>
-    #     <title>Test RSS Feed</title>
-    #     <link>http ://HuddledMasses.org</link>
-    #     <description>An RSS Feed generated simply to demonstrate my XML DSL</description>
-    #     <item>
-    #       <title>The First Item</title>
-    #       <link>http ://huddledmasses.org/new-site-new-layout-lost-posts/</link>
-    #       <guid isPermaLink="true">http ://huddledmasses.org/new-site-new-layout-lost-posts/</guid>
-    #       <description>Ema Lazarus' Poem</description>
-    #       <pubDate>2003-10-31T00:00:00Z</pubDate>
-    #     </item>
-    #   </channel>
-    # </rss>
-    #
-    #
-    # Description
-    # -----------
-    # This example shows the creation of a complete RSS feed with a single item in it.
-    #
-    # NOTE that the backtick in the http`: in the URLs in the input is unecessary, and I added the space after the http: in the URLs  in the output -- these are accomodations to PoshCode's spam filter. Backticks are not need in the input, and spaces do not appear in the actual output.
-    #
-    #
-    #.Example
-    # [XNamespace]$atom="http`://www.w3.org/2005/Atom"
-    # C:\PS>[XNamespace]$dc = "http`://purl.org/dc/elements/1.1"
-    #
-    # C:\PS>New-XDocument ($atom + "feed") -Encoding "UTF-16" -$([XNamespace]::Xml +'lang') "en-US" -dc $dc {
-    #    title {"Test First Entry"}
-    #    link {"http`://HuddledMasses.org"}
-    #    updated {(Get-Date -f u) -replace " ","T"}
-    #    author {
-    #       name {"Joel Bennett"}
-    #       uri {"http`://HuddledMasses.org"}
-    #    }
-    #    id {"http`://huddledmasses.org/" }
-    #
-    #    entry {
-    #       title {"Test First Entry"}
-    #       link {"http`://HuddledMasses.org/new-site-new-layout-lost-posts/" }
-    #       id {"http`://huddledmasses.org/new-site-new-layout-lost-posts/" }
-    #       updated {(Get-Date 10/31/2003 -f u) -replace " ","T"}
-    #       summary {"Ema Lazarus' Poem"}
-    #       link -rel license -href "http`://creativecommons.org/licenses/by/3.0/" -title "CC By-Attribution"
-    #       dc:rights { "Copyright 2009, Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)" }
-    #       category -scheme "http`://huddledmasses.org/tag/" -term "huddled-masses"
-    #    }
-    # } | % { $_.Declaration.ToString(); $_.ToString() }
-    #
-    # <?xml version="1.0" encoding="UTF-16" standalone="yes"?>
-    # <feed xml:lang="en-US" xmlns="http ://www.w3.org/2005/Atom">
-    #   <title>Test First Entry</title>
-    #   <link>http ://HuddledMasses.org</link>
-    #   <updated>2009-07-29T17:25:49Z</updated>
-    #   <author>
-    #      <name>Joel Bennett</name>
-    #      <uri>http ://HuddledMasses.org</uri>
-    #   </author>
-    #   <id>http ://huddledmasses.org/</id>
-    #   <entry>
-    #     <title>Test First Entry</title>
-    #     <link>http ://HuddledMasses.org/new-site-new-layout-lost-posts/</link>
-    #     <id>http ://huddledmasses.org/new-site-new-layout-lost-posts/</id>
-    #     <updated>2003-10-31T00:00:00Z</updated>
-    #     <summary>Ema Lazarus' Poem</summary>
-    #     <link rel="license" href="http ://creativecommons.org/licenses/by/3.0/" title="CC By-Attribution" />
-    #     <dc:rights>Copyright 2009, Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)</dc:rights>
-    #     <category scheme="http ://huddledmasses.org/tag/" term="huddled-masses" />
-    #   </entry>
-    # </feed>
-    #
-    #
-    # Description
-    # -----------
-    # This example shows the use of a default namespace, as well as additional specific namespaces for the "dc" namespace. It also demonstrates how you can get the <?xml?> declaration which does not appear in a simple .ToString().
-    #
-    # NOTE that the backtick in the http`: in the URLs in the input is unecessary, and I added the space after the http: in the URLs  in the output -- these are accomodations to PoshCode's spam filter. Backticks are not need in the input, and spaces do not appear in the actual output.#
-    #
-    #.Notes
-    #  Does not support ShouldProcess
+    <#
+        .SYNOPSIS
+            Creates a new XDocument (the new xml document type)
+        .DESCRIPTION
+            This is the root for a new XML mini-dsl, akin to New-BootsWindow for XAML
+            It creates a new XDocument, and takes scritpblock(s) to define it's contents
+        .EXAMPLE
+            $xml = New-XDocument rss -version "2.0" {
+                channel {
+                    title {"Test RSS Feed"}
+                    link {"http://HuddledMasses.org"}
+                    description {"An RSS Feed generated simply to demonstrate my XML DSL"}
+                    item {
+                        title {"The First Item"}
+                        link {"http://huddledmasses.org/new-site-new-layout-lost-posts/"}
+                        guid -isPermaLink true {"http://huddledmasses.org/new-site-new-layout-lost-posts/"}
+                        description {"Ema Lazarus' Poem"}
+                        pubDate {(Get-Date 10/31/2003 -f u) -replace " ","T"}
+                    }
+                }
+            }
+
+            C:\PS> $xml.ToFullString
+
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <rss version="2.0">
+              <channel>
+                <title>Test RSS Feed</title>
+                <link>http://HuddledMasses.org</link>
+                <description>An RSS Feed generated simply to demonstrate my XML DSL</description>
+                <item>
+                  <title>The First Item</title>
+                  <link>http://huddledmasses.org/new-site-new-layout-lost-posts/</link>
+                  <guid isPermaLink="true">http://huddledmasses.org/new-site-new-layout-lost-posts/</guid>
+                  <description>Ema Lazarus' Poem</description>
+                  <pubDate>2003-10-31T00:00:00Z</pubDate>
+                </item>
+              </channel>
+            </rss>
+
+
+            Description
+            -----------
+            This example shows the creation of a complete RSS feed with a single item in it.
+
+        .EXAMPLE
+            xml (ns "http://www.w3.org/2005/Atom" feed) -Encoding "UTF-16" -$([XNamespace]::Xml +'lang') "en-US" -dc (ns "http://purl.org/dc/elements/1.1") {
+                title { "Test First Entry" }
+                link { "http://HuddledMasses.org" }
+                updated {(Get-Date -f u) -replace " ","T"}
+                author {
+                    name { "Joel Bennett" }
+                    uri { "http://HuddledMasses.org" }
+                }
+                id { "http://huddledmasses.org/" }
+
+                entry {
+                    title { "Test First Entry" }
+                    link { "http://HuddledMasses.org/new-site-new-layout-lost-posts/" }
+                    id { "http://huddledmasses.org/new-site-new-layout-lost-posts/" }
+                    updated {(Get-Date 10/31/2003 -f u) -replace " ","T"}
+                    summary {"Ema Lazarus' Poem"}
+                    link -rel license -href "http://creativecommons.org/licenses/by/3.0/" -title "CC By-Attribution"
+                    dc:rights { "Copyright 2009, Joel Bennettt. Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)" }
+                    category -scheme "http://huddledmasses.org/tag/" -term "huddled-masses"
+                }g
+            } | % ToFullString
+
+            <?xml version="1.0" encoding="UTF-16" standalone="yes"?>
+            <feed xml:lang="en-US" xmlns:dc="http://purl.org/dc/elements/1.1" xmlns="http://www.w3.org/2005/Atom">
+              <title xmlns="">Test First Entry</title>
+              <link xmlns="">http://HuddledMasses.org</link>
+              <updated xmlns="">2020-02-22T01:03:11Z</updated>
+              <author xmlns="">
+                <name>Joel Bennett</name>
+                <uri>http://HuddledMasses.org</uri>
+              </author>
+              <id xmlns="">http://huddledmasses.org/</id>
+              <entry xmlns="">
+                <title>Test First Entry</title>
+                <link>http://HuddledMasses.org/new-site-new-layout-lost-posts/</link>
+                <id>http://huddledmasses.org/new-site-new-layout-lost-posts/</id>
+                <updated>2003-10-31T00:00:00Z</updated>
+                <summary>Ema Lazarus' Poem</summary>
+                <link rel="license" href="http://creativecommons.org/licenses/by/3.0/" title="CC By-Attribution" />
+                <rights>Copyright 2009, Joel Bennettt. Some rights reserved (licensed under the Creative Commons Attribution 3.0 Unported license)</rights>
+                <category scheme="http://huddledmasses.org/tag/" term="huddled-masses" />
+              </entry>
+            </feed>
+
+
+
+            Description
+            -----------
+            This example shows the use of a default namespace, as well as additional specific namespaces for the "dc" namespace. It also demonstrates how you can get the <?xml?> declaration which does not appear in a simple .ToString().
+
+        .NOTES
+            Does not support ShouldProcess
+    #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions","")]
     [CmdletBinding()]
     param(
@@ -1049,6 +1067,9 @@ function New-XDocument {
         [Parameter(Mandatory = $false)]
         [hashtable]$Parameters,
 
+        [Alias("ns")]
+        [XNamespace]$Namespace,
+
         # Allow bypassing ConvertFrom-XmlDsl
         [ValidateSet("XmlDsl","Script")]
         [string]$BlockType="XmlDsl",
@@ -1059,8 +1080,11 @@ function New-XDocument {
         [PSObject[]]$args
     )
     begin {
-        if($root.NamespaceName) {
-            Add-XNamespace -prefix "" -namespace $root.Namespace
+        $PSModuleAutoLoadingPreference = "None"
+        if ($root.NamespaceName) {
+            $null = Add-XNamespace -Namespace $root.Namespace
+        } elseif($Namespace.NamespaceName) {
+            $root = Add-XNamespace -Namespace $Namespace -Localname "$root"
         }
     }
     process {
@@ -1079,12 +1103,14 @@ Set-Alias xml New-XDocument -EA 0
 Set-Alias New-Xml New-XDocument -EA 0
 
 function New-XAttribute {
-    #.Synopsis
-    #   Creates a new XAttribute (an xml attribute on an XElement for XDocument)
-    #.Description
-    #  This is the work-horse for the XML mini-dsl
-    #.Notes
-    #  Does not support ShouldProcess
+    <#
+        .SYNOPSIS
+            Creates a new XAttribute (an xml attribute on an XElement for XDocument)
+        .DESCRIPTION
+            This is the work-horse for the XML mini-dsl
+        .NOTES
+            Does not support ShouldProcess
+    #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions","")]
     [CmdletBinding()]
     param(
@@ -1099,18 +1125,20 @@ Set-Alias xa New-XAttribute -EA 0
 Set-Alias New-XmlAttribute New-XAttribute -EA 0
 
 function New-XElement {
-    #.Synopsis
-    #   Creates a new XElement (an xml tag for XDocument)
-    #.Description
-    #  This is the work-horse for the XML mini-dsl
-    #.Notes
-    #  Does not support ShouldProcess
+    <#
+        .SYNOPSIS
+            Creates a new XElement (an xml tag for XDocument)
+        .DESCRIPTION
+            This is the work-horse for the XML mini-dsl
+        .NOTES
+            Does not support ShouldProcess
+    #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSUseShouldProcessForStateChangingFunctions","")]
     [CmdletBinding()]
     param(
         # The name of the xml tag
         [Parameter(Mandatory = $true, Position = 0)]
-        [XName]$tag,
+        [XName]$Tag,
 
         # Conditional ConvertFrom-XmlDsl
         [ValidateSet("XmlDsl","Script")]
@@ -1119,7 +1147,7 @@ function New-XElement {
         # this is where all the dsl magic happens. Please see the Examples. :)
         [AllowNull()][AllowEmptyString()][AllowEmptyCollection()]
         [Parameter(Position=99, Mandatory = $false, ValueFromRemainingArguments=$true)]
-        [PSObject[]]$args
+        [PSObject[]]$Args
     )
     process {
         New-Object XElement $(
@@ -1138,7 +1166,7 @@ function New-XElement {
                 } elseif ( $value -is [XNamespace]) {
                     Write-Verbose "New XAttribute xmlns: $($attrib.TrimStart("-").TrimEnd(':')) = $value"
                     New-Object XAttribute ([XNamespace]::Xmlns + $attrib.TrimStart("-").TrimEnd(':')), $value
-                    Add-XNameSpace -prefix $attrib.TrimStart("-").TrimEnd(':') -namespace $value
+                    $null = Add-XNameSpace -prefix $attrib.TrimStart("-").TrimEnd(':') -namespace $value
                 } elseif($value -match "^-(?!\d)\w") {
                     $args = @($value)+@($args)
                 } elseif($null -ne $value) {
@@ -1153,53 +1181,74 @@ Set-Alias xe New-XElement
 Set-Alias New-XmlElement New-XElement
 
 function Add-XNamespace {
+    <#
+        .SYNOPSIS
+            Add a namespace to the dictionary for the XmlDsl
+    #>
     param(
-        [Parameter(Mandatory=$true)]$prefix,
-        [Parameter(Mandatory=$true)]$namespace
+        # The namespace prefix for xml nodes
+        [Parameter()]
+        [string]$Prefix,
+
+        # The namespace URL that goes with the prefix
+        [Parameter(Mandatory=$true, Position=0)]
+        [XNamespace]$Namespace,
+
+        [Parameter(Position=1, ParameterSetName="XName")]
+        [string]$Localname
     )
     if ($null -eq $script:NameSpaceHash) {
        $script:NameSpaceHash = New-Object 'Dictionary[String,XNamespace]'
     }
-    if ($script:NameSpaceHash.ContainsKey($prefix)) {
-        if ($script:NameSpaceHash[$prefix] -ne $namespace) {
-            Write-Error "Namespace collision: $prefix already defined as $($script:NameSpaceHash[$prefix])"
-        }
+    if ($NameSpaceHash.ContainsKey($Prefix) -and $NameSpaceHash[$Prefix] -ne $Namespace) {
+        Write-Error "Namespace collision: $Prefix already defined as $($NameSpaceHash[$Prefix])"
+    } elseif ($NameSpaceHash.ContainsKey($Prefix)) {
+        $NameSpaceHash.Add($Prefix, $Namespace)
+    }
+    if ($Localname) {
+        $Namespace + $Localname
     } else {
-        $script:NameSpaceHash.Add($prefix, $namespace)
+        $Namespace
     }
 }
+Set-Alias Namespace Add-XNamespace
+Set-Alias ns Add-XNamespace
+Set-Alias Add-XmlNamespace Add-XNamespace
+Set-Alias xn Add-XNamespace
 
 function ConvertFrom-XmlDsl {
-#.Synopsis
-#   Converts XmlDSL to a ScriptBlock
-#.Description
-#  This is the REAL work-horse for the XML mini-dsl
-[CmdletBinding()]
-Param(
-   [Parameter(Mandatory = $true, Position = 0)]
-   [ScriptBlock]$script,
+    <#
+        .SYNOPSIS
+            Converts XmlDSL to a ScriptBlock
+        .DESCRIPTION
+            This is the REAL work-horse for the XML mini-dsl
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [ScriptBlock]$script,
 
-   [AllowNull()][AllowEmptyString()][AllowEmptyCollection()]
-   [Parameter(Position=1, Mandatory = $false, ValueFromRemainingArguments=$true)]
-   [PSObject[]]$namespaces
-)
-   while($namespaces) {
+        [AllowNull()][AllowEmptyString()][AllowEmptyCollection()]
+        [Parameter(Position=1, Mandatory = $false, ValueFromRemainingArguments=$true)]
+        [PSObject[]]$namespaces
+    )
+    while($namespaces) {
         $prefix, $xnamespace, $namespaces = $namespaces
         if ($xnamespace -is [XNamespace]) {
-            Add-XNameSpace -prefix $prefix.TrimStart("-").TrimEnd(':') -namespace $xnamespace
+            $null = Add-XNameSpace -prefix $prefix.TrimStart("-").TrimEnd(':') -namespace $xnamespace
         }
-   }
+    }
     $parserrors = $null
     $tokens = [PSParser]::Tokenize( $script, [ref]$parserrors )
     [Array]$duds = $tokens | Where-Object { $_.Type -eq "Command" -and !$_.Content.Contains('-') -and ($Null -eq $(Get-Command $_.Content -Type Alias,Cmdlet,Function,ExternalScript -EA 0)) }
-    if($duds) {
+    if ($duds) {
         [Array]::Reverse( $duds )
     }
     [string[]]$ScriptText = "$script" -split "`n"
 
-    foreach($token in $duds) {
+    foreach ($token in $duds) {
         # replace : notation with namespace notation
-        if( $token.Content.Contains(":") ) {
+        if ($token.Content.Contains(":")) {
             $key, $localname = $token.Content -split ":"
             $ScriptText[($token.StartLine - 1)] = $ScriptText[($token.StartLine - 1)].Remove( $token.StartColumn -1, $token.Length ).Insert( $token.StartColumn -1, "'" + $($script:NameSpaceHash[$key] + $localname) + "'" )
         } else {
@@ -1211,4 +1260,10 @@ Param(
     Write-Output ([ScriptBlock]::Create( ($ScriptText -join "`n") ))
 }
 
-Export-ModuleMember -alias * -function ConvertFrom-XmlDsl, New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Remove-XmlElement, Get-XmlContent, Set-XmlContent, Convert-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml, Import-Html, ConvertFrom-Html
+Update-TypeData -TypeName System.Xml.Linq.XDocument -MemberName ToFullString -MemberType ScriptMethod -Value {
+    param([System.Xml.Linq.SaveOptions]$SaveOptions = "None")
+    $this.Declaration.ToString()
+    $this.ToString($SaveOptions)
+} -Force
+
+Export-ModuleMember -alias * -function ConvertFrom-XmlDsl, New-XDocument, New-XAttribute, New-XElement, Remove-XmlNamespace, Remove-XmlElement, Get-XmlContent, Set-XmlContent, Convert-Xml, Select-Xml, Update-Xml, Format-Xml, ConvertTo-CliXml, ConvertFrom-CliXml, Import-Html, ConvertFrom-Html, Add-XNamespace
